@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <defs>
+    <linearGradient id="c5Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="50%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="pageGradL" x1="100%" y1="0%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="pageGradR" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <filter id="c5Glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle / Rounded Background Shield -->
+  <rect width="120" height="120" rx="28" fill="url(#c5Grad)"/>
+
+  <!-- Subtle Inner Border Accent -->
+  <rect x="3" y="3" width="114" height="114" rx="25" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1.5"/>
+
+  <!-- Top Center Badge: "C5" -->
+  <g transform="translate(60, 25)" text-anchor="middle">
+    <!-- Badge pill background -->
+    <rect x="-24" y="-12" width="48" height="23" rx="11.5" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.45)" stroke-width="1.2"/>
+    <text x="0" y="4.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="900" fill="#ffffff" letter-spacing="1.2">C5</text>
+  </g>
+
+  <!-- Open Book Base Graphics -->
+  <g filter="url(#c5Glow)">
+    <!-- Book Spine / Spine glow line -->
+    <path d="M 60 48 L 60 98" stroke="rgba(255,255,255,0.5)" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- Left Book Page Outer -->
+    <path d="M 60 50 C 45 42, 24 45, 17 50 C 15 51.5, 15 54, 15 56 L 15 91 C 15 93, 17 95, 19 94 C 27 89.5, 45 88, 60 96 Z" fill="url(#pageGradL)"/>
+
+    <!-- Right Book Page Outer -->
+    <path d="M 60 50 C 75 42, 96 45, 103 50 C 105 51.5, 105 54, 105 56 L 105 91 C 105 93, 103 95, 101 94 C 93 89.5, 75 88, 60 96 Z" fill="url(#pageGradR)"/>
+
+    <!-- Left Page Subtle Lines -->
+    <path d="M 23 58 C 32 54, 46 54, 55 57" stroke="#cbd5e1" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+    <path d="M 23 88 C 32 84, 46 84, 55 89" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+
+    <!-- Right Page Subtle Lines -->
+    <path d="M 65 57 C 74 54, 88 54, 97 58" stroke="#cbd5e1" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+    <path d="M 65 89 C 74 84, 88 84, 97 88" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+
+    <!-- Stylized 'C' on Left Page -->
+    <text x="37" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="900" fill="#1e3a8a" text-anchor="middle" letter-spacing="-0.5">C</text>
+
+    <!-- Stylized 'S' on Right Page -->
+    <text x="83" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="900" fill="#1e3a8a" text-anchor="middle" letter-spacing="-0.5">S</text>
+  </g>
+
+  <!-- Open Book Page Corner Bookmark / Ribbon -->
+  <polygon points="57,94 60,98 63,94 63,106 60,103 57,106" fill="#f59e0b"/>
+</svg>

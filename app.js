@@ -1,7 +1,5 @@
 /* ============================================================
-   Commerce-Students · app.js
-   Pure helpers are exposed on window.CS (used by node tests);
-   DOM code runs only in a browser.
+   Commerce-Students Study OS (Classes 11 & 12 Commerce)
    ============================================================ */
 (function () {
   'use strict';
@@ -33,12 +31,20 @@
     english: 'https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/English_core_SecP2_2026-27.pdf',
     information: 'https://cbseacademic.nic.in/web_material/Curriculum27/SrSec/802-IT.pdf'
   };
-  var BANK_KEY = { accountancy: 'acc', business: 'bus', economics: 'eco', english: 'eng', information: 'it' };
+
+  var BANK_KEY = {
+    accountancy: 'acc',
+    business: 'bus',
+    economics: 'eco',
+    english: 'eng',
+    information: 'it'
+  };
+
   var TYPE_ORDER = ['mcq', 'short', 'long', 'mixed', 'full'];
   var TYPE_META = {
-    mcq: { label: 'MCQ Paper', desc: '20 multiple-choice questions · auto-graded with explanations', duration: '45 min', marksNote: '1 mark each' },
-    short: { label: 'Short Answer Paper', desc: '20 short-answer questions with model answer points', duration: '60 min', marksNote: '2 marks each' },
-    long: { label: 'Long Answer Paper', desc: '20 long-answer questions with model answer points', duration: '90 min', marksNote: '4 marks each' },
+    mcq: { label: '20-Question MCQ Quiz', desc: 'Objective test with instant score and answer explanations', duration: '25 min', marksNote: '1 mark each' },
+    short: { label: 'Short Answer Paper', desc: 'Short-answer questions with concise model answer points', duration: '60 min', marksNote: '2 marks each' },
+    long: { label: 'Long Answer Paper', desc: 'Long-answer questions with detailed model answer points', duration: '90 min', marksNote: '4 marks each' },
     mixed: { label: 'Mixed Paper', desc: '10 MCQ + 5 short + 3 long in one sitting', duration: '60 min', marksNote: '1 / 2 / 4 marks' },
     full: { label: 'All-in-One Paper', desc: 'Full subject paper in the current CBSE layout with correct marks', duration: '3 hours', marksNote: '80 theory · 60 theory for IT' }
   };
@@ -47,26 +53,32 @@
     theme: 'cs-theme',
     rev: 'cs-rev',
     check: 'cs-check',
-    bookmark: 'cs-bookmark',
+    bookmark: 'cs:bookmarks',
+    mistakes: 'cs:mistakes',
+    quizScores: 'cs:quiz-scores',
+    lastStudy: 'cs:last-study',
     paper: 'cs-paper'
   };
 
-  /* ---------------- storage ---------------- */
+  /* ---------------- helpers ---------------- */
 
   function loadJSON(key, fallback) {
     try {
-      var raw = W.localStorage ? W.localStorage.getItem(key) : null;
-      return raw ? JSON.parse(raw) : fallback;
-    } catch (e) { return fallback; }
-  }
-  function saveJSON(key, value) {
-    try { if (W.localStorage) W.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
+      var v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : fallback;
+    } catch (e) {
+      return fallback;
+    }
   }
 
-  /* ---------------- pure helpers ---------------- */
+  function saveJSON(key, val) {
+    try {
+      localStorage.setItem(key, JSON.stringify(val));
+    } catch (e) {}
+  }
 
-  function esc(value) {
-    return String(value).replace(/[&<>'"]/g, function (ch) {
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch];
     });
   }
@@ -106,19 +118,16 @@
       .filter(function (p) { return chapterSel && chapterSel[p.ci]; });
   }
 
-  /* Pick across selected chapters, most-remaining chapter first
-     (ties broken by chapter order — deterministic).
-     cursor[ci+':'+kind] = items already consumed from this chapter+kind,
-     shared between sections, so every unique question in the selected
-     chapters is used before any question repeats. Wraps (reusing) only
-     when the whole pool is exhausted before `count`. */
-  function pickKind(pools, kind, count, cursor) {
+  /* Intelligent question picking: uses only unique questions unless repeat requested */
+  function pickKind(pools, kind, count, cursor, allowRepeat) {
     var result = [];
     var wrapped = false;
     var totalAvailable = pools.reduce(function (s, p) { return s + p[kind].length; }, 0);
     var active = pools.filter(function (p) { return p[kind].length; });
+    var targetCount = allowRepeat ? count : Math.min(count, totalAvailable);
     var guard = 0;
-    while (result.length < count && active.length && guard < 5000) {
+
+    while (result.length < targetCount && active.length && guard < 5000) {
       guard++;
       var best = 0;
       for (var i = 1; i < active.length; i++) {
@@ -131,7 +140,7 @@
       var used = cursor[key] || 0;
       var pos = used % p[kind].length;
       if (used >= p[kind].length) wrapped = true;
-      result.push({ ci: p.ci, qi: pos, item: p[kind][pos] });
+      result.push({ ci: p.ci, qi: pos, item: p[kind][pos], isRepeated: used >= p[kind].length });
       cursor[key] = used + 1;
     }
     return { items: result, wrapped: wrapped, totalAvailable: totalAvailable };
@@ -139,13 +148,14 @@
 
   var KIND_CODE = { mcq: 'm', sh: 's', lg: 'l', cs: 'c' };
 
-  function normItem(kind, ci, qi, raw, num, marks, grade, subject) {
+  function normItem(kind, ci, qi, raw, num, marks, grade, subject, isRepeated) {
     var base = {
       kind: kind,
       id: grade + '-' + subject + '-c' + ci + '-' + KIND_CODE[kind] + qi,
       num: num,
       marks: marks,
-      chapter: ci
+      chapter: ci,
+      isRepeated: !!isRepeated
     };
     if (kind === 'mcq') {
       base.q = raw[0];
@@ -160,7 +170,7 @@
   }
 
   /* Build a full paper. Deterministic: same spec => same paper. */
-  function buildPaper(spec) {
+  function buildPaper(spec, forceAllRequested) {
     var b = bank(spec.grade, spec.subject);
     if (!b) return null;
     var pools = selectedPools(spec.grade, spec.subject, spec.chapters);
@@ -174,11 +184,11 @@
     var numCounter = 0;
 
     function addSection(heading, kind, count, marksEach) {
-      var pick = pickKind(pools, kind, count, cursor);
+      var pick = pickKind(pools, kind, count, cursor, forceAllRequested);
       reused = reused || pick.wrapped;
-      var items = pick.items.map(function (it, i) {
+      var items = pick.items.map(function (it) {
         numCounter++;
-        return normItem(kind, it.ci, it.qi, it.item, numCounter, marksEach, spec.grade, spec.subject);
+        return normItem(kind, it.ci, it.qi, it.item, numCounter, marksEach, spec.grade, spec.subject, it.isRepeated);
       });
       if (items.length) {
         sections.push({ heading: heading, items: items, marksEach: marksEach });
@@ -223,7 +233,7 @@
     }
 
     if (reused) {
-      extraNote += ' Note: some questions repeat because the selected chapters hold fewer items than this paper needs — widen your chapter selection to fill every slot uniquely.';
+      extraNote += ' Notice: Questions have been repeated because selected chapters hold fewer unique items than the standard quota.';
     }
 
     return {
@@ -238,6 +248,7 @@
     };
   }
 
+  /* Expose globals for testing and extensions */
   W.CS = {
     esc: esc,
     bank: bank,
@@ -249,22 +260,17 @@
     SUBJECT_NAMES: SUBJECT_NAMES,
     TYPE_META: TYPE_META,
     TYPE_ORDER: TYPE_ORDER,
-    CURRICULUM_LINKS: CURRICULUM_LINKS,
-    STORAGE: STORAGE
+    STORAGE: STORAGE,
+    loadJSON: loadJSON,
+    saveJSON: saveJSON
   };
 
-  /* ============================================================
-     Browser only from here
-     ============================================================ */
-  var HAS_DOM = typeof document !== 'undefined' && !!document.getElementById;
-  if (!HAS_DOM) return;
+  /* ---------------- DOM Handles ---------------- */
 
   var app = document.getElementById('app');
   var brandMark = document.getElementById('brand-mark');
-
-  /* ---------------- icons ---------------- */
-
   var LOGO_MARKUP = '<img src="assets/logo.svg" alt="" loading="eager" decoding="async">';
+  if (brandMark) brandMark.innerHTML = LOGO_MARKUP;
 
   var ICONS = {
     sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5 5l1.7 1.7M17.3 17.3L19 19M19 5l-1.7 1.7M6.7 17.3L5 19"/></svg>',
@@ -274,248 +280,321 @@
     gemini: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.8l2.6 7.6 7.6 2.6-7.6 2.6L12 22.2l-2.6-7.6-7.6-2.6 7.6-2.6z"/></svg>',
     notebooklm: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="2.8" width="16" height="18.4" rx="2.6" stroke="currentColor" stroke-width="1.8"/><path d="M8.4 2.8v18.4" stroke="currentColor" stroke-width="1.8"/><path fill="currentColor" d="M15.2 8.9l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z"/></svg>'
   };
-  brandMark.innerHTML = LOGO_MARKUP;
 
   /* ---------------- theme ---------------- */
 
   var themeBtn = document.getElementById('theme-toggle');
   function currentTheme() {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    return document.documentElement.getAttribute('data-theme') || 'light';
   }
-  function paintThemeButton() {
-    var dark = currentTheme() === 'dark';
-    themeBtn.innerHTML = (dark ? ICONS.sun : ICONS.moon) + '<span>' + (dark ? 'Light mode' : 'Dark mode') + '</span>';
-    themeBtn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  function applyTheme(name) {
+    document.documentElement.setAttribute('data-theme', name);
+    try { localStorage.setItem(STORAGE.theme, name); } catch (e) {}
+    if (themeBtn) {
+      themeBtn.innerHTML = name === 'dark' ? ICONS.sun : ICONS.moon;
+      themeBtn.setAttribute('aria-label', name === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+    }
   }
-  var savedTheme = loadJSON(STORAGE.theme, null);
-  if (savedTheme === 'dark' || savedTheme === 'light') document.documentElement.setAttribute('data-theme', savedTheme);
-  paintThemeButton();
-  themeBtn.addEventListener('click', function () {
-    var next = currentTheme() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    saveJSON(STORAGE.theme, next);
-    paintThemeButton();
-  });
+
+  var savedTheme = null;
+  try { savedTheme = localStorage.getItem(STORAGE.theme); } catch (e) {}
+  if (!savedTheme && W.matchMedia && W.matchMedia('(prefers-color-scheme: dark)').matches) {
+    savedTheme = 'dark';
+  }
+  applyTheme(savedTheme === 'dark' ? 'dark' : 'light');
+
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function () {
+      applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+    });
+  }
 
   /* ---------------- mobile nav ---------------- */
 
   var menuBtn = document.getElementById('menu-toggle');
   var mobileNav = document.getElementById('mobile-nav');
-  var NAV_LINKS = [
-    { key: 'home', label: 'Home', href: '#home' },
-    { key: 'classes', label: 'Classes', href: '#classes' },
-    { key: 'revision', label: 'Revision', href: '#revision' },
-    { key: 'ai', label: 'AI', href: '#ai' }
-  ];
-  mobileNav.innerHTML = NAV_LINKS.map(function (l) {
-    return '<a href="' + l.href + '" data-mnav="' + l.key + '">' + l.label + '</a>';
-  }).join('');
   var menuOpen = false;
+
+  var NAV_LINKS = [
+    { nav: 'home', href: '#home', label: 'Home' },
+    { nav: 'classes', href: '#classes', label: 'Classes' },
+    { nav: 'revision', href: '#revision', label: 'Practice' },
+    { nav: 'quiz', href: '#quiz', label: 'Timed Quiz' },
+    { nav: 'study', href: '#study', label: 'My Study' },
+    { nav: 'ai', href: '#ai', label: 'AI Assistant' }
+  ];
+
   function paintMenu() {
-    mobileNav.classList.toggle('open', menuOpen);
-    menuBtn.setAttribute('aria-expanded', String(menuOpen));
+    if (!menuBtn || !mobileNav) return;
     menuBtn.innerHTML = menuOpen ? ICONS.close : ICONS.menu;
+    menuBtn.setAttribute('aria-expanded', String(menuOpen));
+    menuBtn.setAttribute('aria-label', menuOpen ? 'Close navigation menu' : 'Open navigation menu');
+    mobileNav.classList.toggle('open', menuOpen);
   }
-  menuBtn.addEventListener('click', function () { menuOpen = !menuOpen; paintMenu(); });
-  mobileNav.addEventListener('click', function () { menuOpen = false; paintMenu(); });
-  function setNavActive(key) {
+
+  if (menuBtn) {
+    menuBtn.addEventListener('click', function () {
+      menuOpen = !menuOpen;
+      paintMenu();
+    });
+  }
+
+  function setNavActive(name) {
     document.querySelectorAll('.nav-link').forEach(function (a) {
-      a.classList.toggle('active', a.getAttribute('data-nav') === key);
+      a.classList.toggle('active', a.getAttribute('data-nav') === name);
     });
-    document.querySelectorAll('[data-mnav]').forEach(function (a) {
-      a.classList.toggle('active', a.getAttribute('data-mnav') === key);
-    });
+    if (mobileNav) {
+      mobileNav.innerHTML = NAV_LINKS.map(function (item) {
+        return '<a class="' + (item.nav === name ? 'active' : '') + '" href="' + item.href + '">' + item.label + '</a>';
+      }).join('');
+    }
   }
 
-  /* ---------------- shared page bits ---------------- */
-
-  function crumbs(parts) {
+  function crumbs(list) {
     return '<nav class="breadcrumbs" aria-label="Breadcrumb">' +
-      parts.map(function (p, i) {
-        var last = i === parts.length - 1;
-        var inner = last ? '<span class="current">' + esc(p.label) + '</span>' : '<a href="' + p.href + '">' + esc(p.label) + '</a>';
-        return (i ? '<span aria-hidden="true">/</span>' : '') + inner;
-      }).join('') + '</nav>';
+      list.map(function (c, i) {
+        if (i === list.length - 1 || !c.href) {
+          return '<span aria-current="page">' + esc(c.label) + '</span>';
+        }
+        return '<a href="' + c.href + '">' + esc(c.label) + '</a><span>/</span>';
+      }).join('') +
+    '</nav>';
   }
 
   function subjectBlurb(key) {
     return {
-      accountancy: 'Journals, ledgers, statements — and the partnership and company accounts of Class 12.',
-      business: 'From the purpose of business to management principles, finance, markets and consumer protection.',
-      economics: 'Micro and macro with statistics: demand and supply, national income, money and the Indian economy.',
-      english: 'Reading, note-making and writing skills plus the Hornbill, Flamingo, Snapshots and Vistas texts.',
-      information: 'The 802 course: employability skills, computer organization, networks, office tools, SQL and Java.'
-    }[key];
+      accountancy: 'Financial statements, partnership reconstitution, company accounts and cash flows.',
+      business: 'Principles of management, business finance, marketing, and legal protections.',
+      economics: 'Microeconomic producer behavior, macroeconomic national aggregates, money and fiscal budgets.',
+      english: 'CBSE Flamingo, Vistas prose and poetry, and business correspondence models.',
+      information: 'Operating systems, RDBMS SQL, networking, cloud systems, and cyber security.'
+    }[key] || '';
   }
 
-  function subjectCardHTML(grade, key) {
-    var totals = bankTotals(grade, key) || { chapters: 0, mcq: 0, sh: 0, lg: 0, cs: 0 };
-    return '<a class="subject-card" href="#class-' + grade + '/' + key + '">' +
-      '<span class="subj-icon" aria-hidden="true">' + SUBJECT_ICONS[key] + '</span>' +
-      '<h3>' + esc(SUBJECT_NAMES[key]) + '</h3>' +
-      '<p>' + esc(subjectBlurb(key)) + '</p>' +
-      '<span class="subj-meta"><span>' + totals.chapters + ' chapters</span><i></i><span>' + (totals.mcq + totals.sh + totals.lg + totals.cs) + ' original questions</span></span>' +
-    '</a>';
-  }
-
-  /* ---------------- home ---------------- */
-
-  function classCardHTML(grade) {
-    return '<a class="class-card" data-grade="' + (grade === 11 ? 'XI' : 'XII') + '" href="#class-' + grade + '">' +
-      '<span class="class-kicker">Year ' + (grade - 10) + (grade === 12 ? ' · Board year' : ' · Foundation year') + '</span>' +
-      '<h3>Class ' + grade + '</h3>' +
-      '<span class="class-count">5 subjects · chapter roadmaps · revision papers</span>' +
-      '<span class="btn">Open Class ' + grade + ' →</span>' +
-    '</a>';
-  }
+  /* ---------------- home view ---------------- */
 
   function renderHome() {
     setNavActive('home');
-    document.title = 'Commerce-Students · CBSE Commerce Revision';
+    document.title = 'Commerce-Students · CBSE Commerce Revision & Study OS';
+
+    var lastStudy = loadJSON(STORAGE.lastStudy, null);
+    var continueHTML = '';
+    if (lastStudy && lastStudy.grade && lastStudy.subject) {
+      continueHTML =
+        '<section class="section" style="padding-top:20px; padding-bottom:10px;">' +
+          '<div style="padding:16px 20px; border:1px solid var(--fg); border-radius:14px; background:var(--card); display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">' +
+            '<div>' +
+              '<div class="eyebrow" style="margin-bottom:4px;">Continue Studying</div>' +
+              '<strong>Class ' + lastStudy.grade + ' ' + esc(SUBJECT_NAMES[lastStudy.subject]) + '</strong>' +
+              (lastStudy.chapterTitle ? '<span style="color:var(--muted); font-size:13px;"> · ' + esc(lastStudy.chapterTitle) + '</span>' : '') +
+            '</div>' +
+            '<a class="btn btn-solid btn-sm" href="#class-' + lastStudy.grade + '/' + lastStudy.subject + '">Open Subject →</a>' +
+          '</div>' +
+        '</section>';
+    }
+
+    var totalBankQs = 0;
+    [11, 12].forEach(function (g) {
+      SUBJECTS.forEach(function (s) {
+        var t = bankTotals(g, s);
+        if (t) totalBankQs += (t.mcq + t.sh + t.lg + t.cs);
+      });
+    });
+
     app.innerHTML =
       '<section class="shell home-hero"><div class="hero-copy">' +
         '<div class="hero-logo" aria-hidden="true">' + LOGO_MARKUP + '</div>' +
         '<span class="eyebrow">Commerce · XI – XII</span>' +
         '<h1>Commerce-<em>Students</em></h1>' +
-        '<p class="hero-sub">One quiet place to revise the whole commerce syllabus — chapter checklists, original questions and practice papers set in the current CBSE format.</p>' +
+        '<p class="hero-sub">The quiet, distraction-free study operating system for CBSE Commerce. Chapter checklists, original questions, timed tests and custom exam papers with zero login walls.</p>' +
         '<div class="hero-actions">' +
-          '<a class="btn btn-solid" href="#class-11">Start with Class 11</a>' +
-          '<a class="btn" href="#class-12">Start with Class 12</a>' +
-          '<a class="btn btn-soft" href="#revision">Build a revision paper</a>' +
+          '<a class="btn btn-solid" href="#class-12">Class 12 Board Prep</a>' +
+          '<a class="btn btn-soft" href="#class-11">Class 11 Foundation</a>' +
+          '<a class="btn btn-soft" href="#quiz">⚡ 5-Min Timed Quiz</a>' +
         '</div>' +
         '<div class="hero-meta">' +
-          '<span><i></i>5 subjects</span>' +
-          '<span><i></i>Original questions</span>' +
-          '<span><i></i>CBSE-format papers</span>' +
-          '<span><i></i>Progress saved on this device</span>' +
+          '<span><i></i> ' + totalBankQs + '+ Original Questions</span>' +
+          '<span><i></i> 5 Subjects</span>' +
+          '<span><i></i> 100% CBSE 2026–27 Format</span>' +
+          '<span><i></i> Local & Private</span>' +
         '</div>' +
       '</div></section>' +
-      '<section class="shell section"><div class="section-head">' +
-        '<div><span class="eyebrow">Choose your class</span><h2>Two years, one system.</h2></div>' +
-        '<div><p>Open a class to see every subject, tick off chapters as you revise and generate papers at any step.</p></div>' +
-      '</div><div class="class-grid">' +
-        classCardHTML(11) + classCardHTML(12) +
-      '</div></section>' +
-      '<section class="shell section"><div class="section-head">' +
-        '<div><span class="eyebrow">The subjects</span><h2>What you can revise today.</h2></div>' +
-      '</div><div class="subjects-strip">' +
-        SUBJECTS.map(function (key) {
-          var totals11 = bankTotals(11, key) || {};
-          return '<a class="strip-card" href="#class-11/' + key + '">' +
-            '<span class="strip-icon" aria-hidden="true">' + SUBJECT_ICONS[key] + '</span>' +
-            '<strong>' + esc(SUBJECT_NAMES[key]) + '</strong>' +
-            '<small>' + (totals11.chapters || 0) + ' chapters · Class 11 & 12</small>' +
-          '</a>';
-        }).join('') +
-      '</div></section>';
+      '<div class="shell">' +
+        continueHTML +
+        '<section class="section">' +
+          '<div class="section-head">' +
+            '<div><span class="eyebrow">Curriculum</span><h2>Choose your year</h2></div>' +
+            '<p>Class 11 builds conceptual accounting principles and economic models; Class 12 focuses directly on board examination preparation.</p>' +
+          '</div>' +
+          '<div class="class-grid">' +
+            '<a class="class-card" href="#class-11" data-grade="11">' +
+              '<span class="class-kicker">Foundation Year</span>' +
+              '<h3>Class 11 Commerce</h3>' +
+              '<span class="class-count">5 Subjects · Accountancy, BST, Economics, English, IT</span>' +
+              '<span class="card-arrow">Start Class 11 →</span>' +
+            '</a>' +
+            '<a class="class-card" href="#class-12" data-grade="12">' +
+              '<span class="class-kicker">Board Year</span>' +
+              '<h3>Class 12 Commerce</h3>' +
+              '<span class="class-count">5 Subjects · Board-aligned question banks & case studies</span>' +
+              '<span class="card-arrow">Start Class 12 →</span>' +
+            '</a>' +
+          '</div>' +
+        '</section>' +
+        '<section class="section">' +
+          '<div class="section-head">' +
+            '<div><span class="eyebrow">Quick Practice</span><h2>Instant study shortcuts</h2></div>' +
+            '<p>Jump directly into practice drills or review mistakes from your previous tests.</p>' +
+          '</div>' +
+          '<div class="choice-grid cols-3">' +
+            '<a class="choice" href="#quiz">' +
+              '<strong>⚡ 5-Minute Timed Quiz</strong>' +
+              '<small>Rapid-fire 10 MCQs with countdown timer across any commerce subject.</small>' +
+            '</a>' +
+            '<a class="choice" href="#revision">' +
+              '<strong>📝 Custom Paper Builder</strong>' +
+              '<small>Generate 20-MCQ quizzes, mixed tests, or complete 80-mark mock papers.</small>' +
+            '</a>' +
+            '<a class="choice" href="#study">' +
+              '<strong>⭐ My Study & Mistakes</strong>' +
+              '<small>Review your saved bookmarks, chapter progress, and error notebook.</small>' +
+            '</a>' +
+          '</div>' +
+        '</section>' +
+      '</div>';
   }
 
-  /* ---------------- classes & class pages ---------------- */
+  /* ---------------- classes view ---------------- */
 
   function renderClasses() {
     setNavActive('classes');
     document.title = 'Classes · Commerce-Students';
+
     var block = function (grade) {
-      return '<section class="class-block">' +
-        '<div class="class-block-head"><span class="class-badge">Class ' + grade + '</span><h2>Class ' + grade + ' subjects</h2>' +
-        '<a class="btn btn-soft btn-sm" href="#revision">Revise this class →</a></div>' +
-        '<div class="subjects-grid">' + SUBJECTS.map(function (key) { return subjectCardHTML(grade, key); }).join('') + '</div>' +
+      return '<section class="class-block" style="margin-bottom:36px;">' +
+        '<div class="section-head">' +
+          '<div><span class="eyebrow">Year ' + (grade - 10) + '</span><h2>Class ' + grade + ' Subjects</h2></div>' +
+          '<a class="btn btn-soft btn-sm" href="#class-' + grade + '">Explore Class ' + grade + ' →</a>' +
+        '</div>' +
+        '<div class="subjects-grid">' +
+          SUBJECTS.map(function (key) {
+            var b = bank(grade, key);
+            var chCount = b ? b.chapters.length : 0;
+            return '<a class="subject-card" href="#class-' + grade + '/' + key + '">' +
+              '<span class="subject-icon">' + SUBJECT_ICONS[key] + '</span>' +
+              '<h4>' + esc(SUBJECT_NAMES[key]) + '</h4>' +
+              '<p>' + esc(subjectBlurb(key)) + '</p>' +
+              '<span class="subject-meta">' + chCount + ' chapters</span>' +
+            '</a>';
+          }).join('') +
+        '</div>' +
       '</section>';
     };
-    app.innerHTML = '<section class="shell page-view">' +
-      '<div class="eyebrow">Both years</div>' +
-      '<h1 class="page-title">Classes</h1>' +
-      '<p class="page-intro">Pick your class, then open a subject to see its chapter checklist, key points and revision tools.</p>' +
-      block(11) + block(12) +
-    '</section>';
+
+    app.innerHTML =
+      '<section class="shell page-view">' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Classes' }]) +
+        '<div class="eyebrow">Academic Curriculum</div>' +
+        '<h1 class="page-title">Classes 11 and 12</h1>' +
+        '<p class="page-intro">Complete syllabi and question banks for CBSE Commerce students across both senior secondary years.</p>' +
+        block(11) +
+        block(12) +
+      '</section>';
   }
+
+  /* ---------------- class detail view ---------------- */
 
   function renderClass(grade) {
     setNavActive('classes');
-    document.title = 'Class ' + grade + ' · Commerce-Students';
+    document.title = 'Class ' + grade + ' Commerce · Commerce-Students';
+
     app.innerHTML =
       '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'Class ' + grade }]) +
-        '<div class="eyebrow">Year ' + (grade - 10) + '</div>' +
-        '<h1 class="page-title">Class ' + grade + '</h1>' +
-        '<p class="page-intro">Open a subject for its chapter checklist and key points — or jump straight to the revision builder for this class.</p>' +
-        '<div class="subjects-grid" style="margin-top:24px">' +
-          SUBJECTS.map(function (key) { return subjectCardHTML(grade, key); }).join('') +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Classes', href: '#classes' }, { label: 'Class ' + grade }]) +
+        '<div class="eyebrow">CBSE Class ' + grade + '</div>' +
+        '<h1 class="page-title">Class ' + grade + ' Commerce</h1>' +
+        '<p class="page-intro">Select a subject to view the chapter checklist, revise flashcard key points, and generate custom revision papers.</p>' +
+        '<div class="subjects-grid">' +
+          SUBJECTS.map(function (key) {
+            var b = bank(grade, key);
+            var t = bankTotals(grade, key) || {};
+            var qCount = (t.mcq || 0) + (t.sh || 0) + (t.lg || 0) + (t.cs || 0);
+            return '<a class="subject-card" href="#class-' + grade + '/' + key + '">' +
+              '<span class="subject-icon">' + SUBJECT_ICONS[key] + '</span>' +
+              '<h4>' + esc(SUBJECT_NAMES[key]) + '</h4>' +
+              '<p>' + esc(subjectBlurb(key)) + '</p>' +
+              '<span class="subject-meta">' + (b ? b.chapters.length : 0) + ' chapters · ' + qCount + ' questions</span>' +
+            '</a>';
+          }).join('') +
         '</div>' +
-        '<div class="rev-actions"><a class="btn btn-solid" href="#revision">Build a Class ' + grade + ' paper →</a></div>' +
       '</section>';
   }
 
-  /* ---------------- subject detail ---------------- */
-
-  function checklistKey(grade, subject) { return grade + '-' + subject; }
-  function loadChecklist(grade, subject, length) {
-    var raw = (loadJSON(STORAGE.check, {}) || {})[checklistKey(grade, subject)] || [];
-    var out = [];
-    for (var i = 0; i < length; i++) out.push(!!raw[i]);
-    return out;
-  }
-  function saveChecklist(grade, subject, arr) {
-    var all = loadJSON(STORAGE.check, {}) || {};
-    all[checklistKey(grade, subject)] = arr;
-    saveJSON(STORAGE.check, all);
-  }
-
-  var qrState = { cards: [], i: 0 };
+  /* ---------------- subject view (checklist & quick revision) ---------------- */
 
   function renderSubject(grade, key) {
-    if (SUBJECTS.indexOf(key) === -1) { location.hash = '#class-' + grade; return; }
     setNavActive('classes');
     var b = bank(grade, key);
-    if (!b) { location.hash = '#class-' + grade; return; }
+    if (!b) { location.hash = '#classes'; return; }
     document.title = SUBJECT_NAMES[key] + ' · Class ' + grade + ' · Commerce-Students';
-    var checked = loadChecklist(grade, key, b.chapters.length);
+
+    saveJSON(STORAGE.lastStudy, { grade: grade, subject: key, chapterTitle: b.chapters[0] ? b.chapters[0].t : '' });
+
+    var totals = bankTotals(grade, key) || { mcq: 0, sh: 0, lg: 0, cs: 0 };
+    var chKey = STORAGE.check + ':' + grade + ':' + key;
+    var checked = loadJSON(chKey, []) || [];
+    while (checked.length < b.chapters.length) checked.push(false);
     var done = checked.filter(Boolean).length;
-    var totals = bankTotals(grade, key) || {};
     var pct = Math.round((done / b.chapters.length) * 100);
 
-    // flashcards prepared before markup so the first paint is correct
-    qrState.cards = [];
-    b.chapters.forEach(function (ch) {
-      (ch.k || []).forEach(function (kp) { qrState.cards.push({ chapter: ch.t, text: kp }); });
+    var cards = [];
+    b.chapters.forEach(function (ch, ci) {
+      (ch.k || []).forEach(function (point) {
+        cards.push({ chapterIndex: ci, chapter: 'Ch ' + (ci + 1) + ' · ' + ch.t, text: point });
+      });
     });
-    qrState.i = 0;
+
+    var qrState = { i: 0, filterChapter: 'all', cards: cards };
+
+    function activeCards() {
+      if (qrState.filterChapter === 'all') return qrState.cards;
+      var ci = Number(qrState.filterChapter);
+      return qrState.cards.filter(function (c) { return c.chapterIndex === ci; });
+    }
 
     var chaptersHTML = b.chapters.map(function (ch, ci) {
-      var keyPoints = (ch.k || []).map(function (kp, ki) {
-        return '<div class="keypoint"><b>' + (ki + 1) + '.</b> ' + esc(kp) + '</div>';
-      }).join('');
-      return '<div class="chapter' + (checked[ci] ? ' checked' : '') + '" data-ci="' + ci + '">' +
-        '<button class="chapter-row" type="button" aria-expanded="false">' +
-          '<span class="chapter-check" aria-hidden="true">' + (checked[ci] ? '✓' : '') + '</span>' +
+      var isDone = !!checked[ci];
+      return '<div class="chapter' + (isDone ? ' checked' : '') + '" data-ci="' + ci + '">' +
+        '<div class="chapter-row">' +
+          '<button class="chapter-check" type="button" aria-label="Mark chapter ' + (ci + 1) + ' completed">' + (isDone ? '✓' : '') + '</button>' +
           '<span class="chapter-num">' + String(ci + 1).padStart(2, '0') + '</span>' +
           '<span class="chapter-title">' + esc(ch.t) + '</span>' +
-          '<span class="chapter-toggle-ic" aria-hidden="true">＋</span>' +
-        '</button>' +
-        '<div class="chapter-body">' + keyPoints + '</div>' +
+          '<span class="chapter-toggle" aria-hidden="true">▼</span>' +
+        '</div>' +
+        '<div class="chapter-body">' +
+          '<strong>Core syllabus concepts:</strong>' +
+          '<ul>' + (ch.k || []).map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' +
+          '<div class="chapter-actions">' +
+            '<a class="btn btn-soft btn-sm" href="#revision/preset/' + grade + '/' + key + '">Practice this chapter →</a>' +
+            '<button class="btn btn-soft btn-sm ai-ask-btn" type="button" data-grade="' + grade + '" data-subject="' + key + '" data-chapter="' + ci + '">Ask AI about Chapter</button>' +
+          '</div>' +
+        '</div>' +
       '</div>';
     }).join('');
-
-    var c0 = qrState.cards[0];
-    var qrHTML = '<div class="qr-card" id="qr-card">' +
-      '<div class="qr-top"><span>Key point</span><span class="qr-count" id="qr-count">' + (qrState.i + 1) + ' / ' + qrState.cards.length + '</span></div>' +
-      '<div class="qr-chapter" id="qr-chapter">' + esc(c0.chapter) + '</div>' +
-      '<div class="qr-text" id="qr-text">' + esc(c0.text) + '</div>' +
-      '<div class="qr-nav">' +
-        '<button class="btn btn-soft btn-sm" id="qr-prev" type="button">← Previous</button>' +
-        '<button class="btn btn-soft btn-sm" id="qr-shuffle" type="button">Shuffle</button>' +
-        '<button class="btn btn-solid btn-sm" id="qr-next" type="button">Next →</button>' +
-      '</div></div>';
 
     app.innerHTML =
       '<section class="shell page-view">' +
         crumbs([{ label: 'Home', href: '#home' }, { label: 'Class ' + grade, href: '#class-' + grade }, { label: SUBJECT_NAMES[key] }]) +
-        '<div class="subject-hero"><div>' +
-          '<span class="eyebrow">Class ' + grade + ' · ' + (key === 'information' ? 'Subject 802' : 'Core subject') + '</span>' +
-          '<h1>' + esc(SUBJECT_NAMES[key]) + '</h1>' +
-          '<p>' + esc(subjectBlurb(key)) + '</p>' +
-        '</div><div class="subject-hero-meta"><strong>' + b.chapters.length + '</strong><span>chapters</span>' +
-        '<div style="margin-top:8px"><strong style="font-size:15px">' + (totals.mcq + totals.sh + totals.lg + totals.cs) + '</strong><span>questions in the bank</span></div></div>' +
+        '<div class="subject-hero">' +
+          '<div>' +
+            '<span class="eyebrow">Class ' + grade + ' · ' + (key === 'information' ? 'Subject 802' : 'Core subject') + '</span>' +
+            '<h1>' + esc(SUBJECT_NAMES[key]) + '</h1>' +
+            '<p>' + esc(subjectBlurb(key)) + '</p>' +
+          '</div>' +
+          '<div class="subject-hero-meta">' +
+            '<strong>' + b.chapters.length + '</strong><span>chapters</span>' +
+            '<div style="margin-top:8px"><strong style="font-size:22px">' + (totals.mcq + totals.sh + totals.lg + totals.cs) + '</strong><span>questions in bank</span></div>' +
+          '</div>' +
         '</div>' +
         '<div class="detail-grid">' +
           '<section class="panel">' +
@@ -525,15 +604,31 @@
               '<div class="progress-line"><i id="check-progress" style="width:' + pct + '%"></i></div>' +
               '<div class="progress-meta"><span id="check-label">' + done + ' of ' + b.chapters.length + ' chapters revised</span><span id="check-pct">' + pct + '%</span></div>' +
             '</div>' +
-            '<button class="btn btn-soft btn-sm checklist-reset" id="check-reset" type="button">Reset checklist</button>' +
+            '<button class="btn btn-soft btn-sm checklist-reset" id="check-reset" type="button" style="margin-top:14px;">Reset checklist</button>' +
           '</section>' +
           '<aside>' +
             '<div class="panel">' +
-              '<div class="panel-title"><h2>Quick revision</h2><span>Flashcards from key points</span></div>' +
-              qrHTML +
+              '<div class="panel-title">' +
+                '<h2>Quick revision</h2>' +
+                '<select id="qr-filter" style="padding:4px 8px; font-size:12px; border:1px solid var(--line); border-radius:6px; background:var(--card);">' +
+                  '<option value="all">All Chapters</option>' +
+                  b.chapters.map(function (c, i) { return '<option value="' + i + '">Ch ' + (i + 1) + '</option>'; }).join('') +
+                '</select>' +
+              '</div>' +
+              '<div class="qr-card">' +
+                '<span class="qr-tag" id="qr-chapter"></span>' +
+                '<p class="qr-text" id="qr-text"></p>' +
+                '<div class="qr-nav">' +
+                  '<button class="btn btn-soft btn-sm" id="qr-prev" type="button" aria-label="Previous card">←</button>' +
+                  '<span class="qr-count" id="qr-count"></span>' +
+                  '<button class="btn btn-soft btn-sm" id="qr-next" type="button" aria-label="Next card">→</button>' +
+                  '<button class="btn btn-soft btn-sm" id="qr-shuffle" type="button">Shuffle</button>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
             '<div class="side-actions">' +
-              '<a class="btn btn-solid" href="#revision/preset/' + grade + '/' + key + '">Revise this subject →</a>' +
+              '<a class="btn btn-solid" href="#revision/preset/' + grade + '/' + key + '">Practice this subject →</a>' +
+              '<a class="btn btn-soft" href="#quiz">Timed Quiz (Class ' + grade + ') →</a>' +
               '<a class="btn btn-soft" href="#class-' + grade + '">← All Class ' + grade + ' subjects</a>' +
               (key === 'information' && grade === 11 ? '<a class="btn btn-soft" href="class11-it-notes.html">Open detailed IT notes ↗</a>' : '') +
               '<a class="btn btn-soft" href="' + CURRICULUM_LINKS[key] + '" target="_blank" rel="noreferrer">CBSE curriculum PDF ↗</a>' +
@@ -543,57 +638,95 @@
       '</section>';
 
     function paintQr() {
-      var c = qrState.cards[qrState.i];
-      document.getElementById('qr-count').textContent = (qrState.i + 1) + ' / ' + qrState.cards.length;
+      var pool = activeCards();
+      if (!pool.length) {
+        document.getElementById('qr-chapter').textContent = 'No cards';
+        document.getElementById('qr-text').textContent = 'No key points available for this chapter.';
+        document.getElementById('qr-count').textContent = '0 / 0';
+        return;
+      }
+      qrState.i = Math.max(0, Math.min(qrState.i, pool.length - 1));
+      var c = pool[qrState.i];
+      document.getElementById('qr-count').textContent = (qrState.i + 1) + ' / ' + pool.length;
       document.getElementById('qr-chapter').textContent = c.chapter;
       document.getElementById('qr-text').textContent = c.text;
     }
-    function paintChecklistState(arr) {
-      var n = arr.filter(Boolean).length;
-      var p = Math.round((n / b.chapters.length) * 100);
-      app.querySelectorAll('#chapter-list .chapter').forEach(function (el) {
-        var i = Number(el.getAttribute('data-ci'));
-        el.classList.toggle('checked', !!arr[i]);
-        el.querySelector('.chapter-check').textContent = arr[i] ? '✓' : '';
-      });
-      document.getElementById('check-progress').style.width = p + '%';
-      document.getElementById('check-label').textContent = n + ' of ' + b.chapters.length + ' chapters revised';
-      document.getElementById('check-pct').textContent = p + '%';
-    }
 
-    document.getElementById('qr-next').addEventListener('click', function () { qrState.i = (qrState.i + 1) % qrState.cards.length; paintQr(); });
-    document.getElementById('qr-prev').addEventListener('click', function () { qrState.i = (qrState.i - 1 + qrState.cards.length) % qrState.cards.length; paintQr(); });
+    paintQr();
+
+    document.getElementById('qr-filter').addEventListener('change', function (e) {
+      qrState.filterChapter = e.target.value;
+      qrState.i = 0;
+      paintQr();
+    });
+
+    document.getElementById('qr-next').addEventListener('click', function () {
+      var pool = activeCards();
+      if (pool.length) { qrState.i = (qrState.i + 1) % pool.length; paintQr(); }
+    });
+    document.getElementById('qr-prev').addEventListener('click', function () {
+      var pool = activeCards();
+      if (pool.length) { qrState.i = (qrState.i - 1 + pool.length) % pool.length; paintQr(); }
+    });
     document.getElementById('qr-shuffle').addEventListener('click', function () {
-      for (var i = qrState.cards.length - 1; i > 0; i--) {
+      var pool = activeCards();
+      for (var i = pool.length - 1; i > 0; i--) {
         var j = Math.floor(Math.random() * (i + 1));
-        var t = qrState.cards[i]; qrState.cards[i] = qrState.cards[j]; qrState.cards[j] = t;
+        var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
       }
-      qrState.i = 0; paintQr();
+      qrState.i = 0;
+      paintQr();
     });
 
     var list = document.getElementById('chapter-list');
     list.addEventListener('click', function (e) {
       var row = e.target.closest('.chapter-row');
-      if (!row) return;
-      var chapterEl = row.closest('.chapter');
-      var ci = Number(chapterEl.getAttribute('data-ci'));
-      if (e.target.closest('.chapter-check')) {
-        checked[ci] = !checked[ci];
-        saveChecklist(grade, key, checked);
-        paintChecklistState(checked);
+      var chkBtn = e.target.closest('.chapter-check');
+      var aiBtn = e.target.closest('.ai-ask-btn');
+
+      if (aiBtn) {
+        var g = Number(aiBtn.getAttribute('data-grade'));
+        var s = aiBtn.getAttribute('data-subject');
+        var c = Number(aiBtn.getAttribute('data-chapter'));
+        openAIPromptModal('chapter', { grade: g, subject: s, chapterIndex: c });
         return;
       }
-      chapterEl.classList.toggle('open');
-      row.setAttribute('aria-expanded', String(chapterEl.classList.contains('open')));
+
+      if (chkBtn) {
+        var pEl = chkBtn.closest('.chapter');
+        var ci = Number(pEl.getAttribute('data-ci'));
+        checked[ci] = !checked[ci];
+        saveJSON(chKey, checked);
+        var n = checked.filter(Boolean).length;
+        var p = Math.round((n / b.chapters.length) * 100);
+        pEl.classList.toggle('checked', checked[ci]);
+        chkBtn.textContent = checked[ci] ? '✓' : '';
+        document.getElementById('check-progress').style.width = p + '%';
+        document.getElementById('check-label').textContent = n + ' of ' + b.chapters.length + ' chapters revised';
+        document.getElementById('check-pct').textContent = p + '%';
+        return;
+      }
+
+      if (row) {
+        var chEl = row.closest('.chapter');
+        chEl.classList.toggle('open');
+      }
     });
+
     document.getElementById('check-reset').addEventListener('click', function () {
-      for (var i = 0; i < checked.length; i++) checked[i] = false;
-      saveChecklist(grade, key, checked);
-      paintChecklistState(checked);
+      checked = b.chapters.map(function () { return false; });
+      saveJSON(chKey, checked);
+      app.querySelectorAll('#chapter-list .chapter').forEach(function (el) {
+        el.classList.remove('checked');
+        el.querySelector('.chapter-check').textContent = '';
+      });
+      document.getElementById('check-progress').style.width = '0%';
+      document.getElementById('check-label').textContent = '0 of ' + b.chapters.length + ' chapters revised';
+      document.getElementById('check-pct').textContent = '0%';
     });
   }
 
-  /* ---------------- revision builder ---------------- */
+  /* ---------------- revision paper builder ---------------- */
 
   var revState = { grade: 11, type: 'mcq', subject: 'accountancy', chapters: {} };
 
@@ -618,13 +751,15 @@
       revState.chapters = defaultChapters(revState.grade, revState.subject);
     }
   }
+
   function saveRevState() { saveJSON(STORAGE.rev, revState); }
 
   var lastPaper = null;
 
   function renderRevision(preset) {
     setNavActive('revision');
-    document.title = 'Revision · Commerce-Students';
+    document.title = 'Practice & Paper Builder · Commerce-Students';
+
     if (preset) {
       var parts = preset.split(':');
       var g = Number(parts[0]);
@@ -639,13 +774,14 @@
     }
 
     var b = bank(revState.grade, revState.subject);
+    if (!b) return;
 
     app.innerHTML =
       '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'Revision' }]) +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Practice' }]) +
         '<div class="eyebrow">Five steps</div>' +
-        '<h1 class="page-title">Revision paper builder</h1>' +
-        '<p class="page-intro">Choose a class, a paper type, a subject and chapters — then generate a paper with original questions. Your choices are saved on this device.</p>' +
+        '<h1 class="page-title">Practice & Revision Paper Builder</h1>' +
+        '<p class="page-intro">Build custom practice papers, 20-question quizzes, or full CBSE mock examinations. Your preferences are saved automatically.</p>' +
         '<div class="steps-rail">' +
           ['Class', 'Paper type', 'Subject', 'Chapters', 'Generate'].map(function (label, i) {
             return '<span class="step-pill" id="step-pill-' + i + '"><i>' + (i + 1) + '</i>' + label + '</span>';
@@ -660,7 +796,7 @@
                 '</button>';
               }).join('') +
             '</div>') +
-          revStepHTML(1, 'Paper type', 'What should the generated paper contain?',
+          revStepHTML(1, 'Paper type', 'What kind of practice test do you need?',
             '<div class="choice-grid cols-5">' +
               TYPE_ORDER.map(function (t) {
                 return '<button type="button" class="choice' + (revState.type === t ? ' selected' : '') + '" data-role="type" data-value="' + t + '">' +
@@ -676,7 +812,7 @@
                 '</button>';
               }).join('') +
             '</div>') +
-          revStepHTML(3, 'Chapters', 'Select all, one or multiple chapters for ' + esc(SUBJECT_NAMES[revState.subject]) + '.',
+          revStepHTML(3, 'Chapters', 'Select all, one, or multiple chapters for ' + esc(SUBJECT_NAMES[revState.subject]) + '.',
             '<div class="chip-tools"><button type="button" id="ch-all">Select all</button><button type="button" id="ch-none">Clear all</button></div>' +
             '<div class="chips-grid" id="chip-grid">' +
               b.chapters.map(function (ch, ci) {
@@ -687,7 +823,7 @@
                 '</button>';
               }).join('') +
             '</div>') +
-          revStepHTML(4, 'Generate', 'Check the plan, then build the paper.',
+          revStepHTML(4, 'Generate', 'Check the plan, then generate the paper.',
             '<div class="summary-box" id="rev-summary"></div>' +
             '<div class="rev-actions">' +
               '<button class="btn btn-solid" id="rev-generate" type="button">Generate paper →</button>' +
@@ -705,43 +841,37 @@
     }
 
     function summaryRows() {
-      var t = bankTotals(revState.grade, revState.subject) || {};
+      var pools = selectedPools(revState.grade, revState.subject, revState.chapters);
+      var availMCQ = pools.reduce(function (s, p) { return s + p.mcq.length; }, 0);
       return '<div class="summary-row"><span>Class</span><span>Class ' + revState.grade + '</span></div>' +
         '<div class="summary-row"><span>Paper</span><span>' + TYPE_META[revState.type].label + ' · ' + TYPE_META[revState.type].duration + '</span></div>' +
         '<div class="summary-row"><span>Subject</span><span>' + esc(SUBJECT_NAMES[revState.subject]) + '</span></div>' +
         '<div class="summary-row"><span>Chapters</span><span>' + selCount() + ' of ' + b.chapters.length + ' selected</span></div>' +
-        '<div class="summary-row"><span>Questions available</span><span>' + (t.mcq + t.sh + t.lg + t.cs) + ' in bank · ' + (t.mcq || 0) + ' MCQ / ' + (t.sh || 0) + ' short / ' + (t.lg || 0) + ' long / ' + (t.cs || 0) + ' case</span></div>';
+        '<div class="summary-row"><span>Questions in Selection</span><span>' + availMCQ + ' MCQs available</span></div>';
     }
 
     function paintSteps() {
-      var valid = [
-        [11, 12].indexOf(revState.grade) !== -1,
-        TYPE_ORDER.indexOf(revState.type) !== -1,
-        SUBJECTS.indexOf(revState.subject) !== -1,
-        selCount() > 0,
-        true
-      ];
-      for (var i = 0; i < 5; i++) {
-        var pill = document.getElementById('step-pill-' + i);
-        if (!pill) return;
-        pill.classList.toggle('done', valid[i] && i < 4);
-        pill.classList.toggle('current', i === 4 && valid[3]);
-        document.getElementById('rev-step-' + i).style.opacity = valid[i] ? '1' : '.55';
-      }
-      var sum = document.getElementById('rev-summary');
-      if (sum) sum.innerHTML = summaryRows();
+      var count = selCount();
+      document.getElementById('rev-summary').innerHTML = summaryRows();
+      var genBtn = document.getElementById('rev-generate');
       var note = document.getElementById('rev-note');
-      if (note) {
-        var n = selCount();
-        note.textContent = n ? 'Ready — questions will be drawn only from your ' + n + ' selected chapter' + (n > 1 ? 's' : '') + '.' : 'Select at least one chapter above.';
+      if (count === 0) {
+        genBtn.disabled = true;
+        genBtn.style.opacity = '0.5';
+        note.textContent = 'Please select at least one chapter to build a paper.';
+      } else {
+        genBtn.disabled = false;
+        genBtn.style.opacity = '1';
+        note.textContent = 'Ready to generate.';
       }
     }
 
     function paintChipStates() {
-      app.querySelectorAll('[data-role="chapter"]').forEach(function (el) {
-        var ci = Number(el.getAttribute('data-value'));
-        el.classList.toggle('selected', !!revState.chapters[ci]);
-        el.querySelector('.chip-box').textContent = revState.chapters[ci] ? '✓' : '';
+      document.querySelectorAll('#chip-grid .chip').forEach(function (btn) {
+        var ci = Number(btn.getAttribute('data-value'));
+        var on = !!revState.chapters[ci];
+        btn.classList.toggle('selected', on);
+        btn.querySelector('.chip-box').textContent = on ? '✓' : '';
       });
     }
 
@@ -763,7 +893,7 @@
         revState.grade = Number(trigger.getAttribute('data-value'));
         revState.chapters = defaultChapters(revState.grade, revState.subject);
         saveRevState();
-        renderRevision(); // re-render with the new class
+        renderRevision();
         return;
       }
       if (role === 'subject') {
@@ -794,27 +924,16 @@
     document.getElementById('rev-generate').addEventListener('click', function () {
       if (!selCount()) return;
       var spec = { grade: revState.grade, subject: revState.subject, type: revState.type, chapters: revState.chapters };
-      lastPaper = buildPaper(spec);
+      lastPaper = buildPaper(spec, false);
       saveRevState();
       saveJSON(STORAGE.paper, spec);
       location.hash = '#paper';
     });
 
-    for (var si = 0; si < 5; si++) {
-      (function (idx) {
-        var pill = document.getElementById('step-pill-' + idx);
-        pill.style.cursor = 'pointer';
-        pill.addEventListener('click', function () {
-          var el = document.getElementById('rev-step-' + idx);
-          if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-      })(si);
-    }
-
     paintSteps();
   }
 
-  /* ---------------- paper ---------------- */
+  /* ---------------- paper view & scoring ---------------- */
 
   var paperCtx = { spec: null, paper: null };
 
@@ -822,29 +941,28 @@
     setNavActive('revision');
     var spec = lastPaper && lastPaper.spec ? lastPaper.spec : loadJSON(STORAGE.paper, null);
     if (!spec) { location.hash = '#revision'; return; }
-    paperCtx = { spec: spec, paper: buildPaper(spec) };
+    paperCtx = { spec: spec, paper: buildPaper(spec, false) };
     var paper = paperCtx.paper;
     if (!paper) { location.hash = '#revision'; return; }
     document.title = paper.typeLabel + ' · Class ' + spec.grade + ' · Commerce-Students';
+
     var bookmarked = loadJSON(STORAGE.bookmark, {}) || {};
     var bmCount = Object.keys(bookmarked).filter(function (id) { return bookmarked[id]; }).length;
     var hasMcq = paper.sections.some(function (s) { return s.items.some(function (it) { return it.kind === 'mcq'; }); });
     var b = bank(spec.grade, spec.subject);
 
-    function shortTitle(t, max) {
-      return t.length > max ? t.slice(0, max - 1) + '…' : t;
-    }
-
     function questionHTML(it, si) {
       var chTitle = b.chapters[it.chapter] ? b.chapters[it.chapter].t : '';
+      var isBM = !!bookmarked[it.id];
       var body = '<div class="q-top">' +
         '<span class="q-num">' + it.num + '</span>' +
-        '<span class="q-text">' + esc(it.q) + '</span>' +
-        '<button class="bm-btn" type="button" data-qid="' + esc(it.id) + '" aria-label="Bookmark question" title="Bookmark">' + (bookmarked[it.id] ? '★' : '☆') + '</button>' +
+        '<span class="q-text">' + esc(it.q) + (it.isRepeated ? ' <span style="font-size:11px; color:var(--muted); font-weight:normal;">(repeated item)</span>' : '') + '</span>' +
+        '<button class="bm-btn' + (isBM ? ' on' : '') + '" type="button" data-qid="' + esc(it.id) + '" aria-label="Bookmark question" title="Bookmark">' + (isBM ? '★' : '☆') + '</button>' +
         '<span class="q-marks">' + it.marks + ' mark' + (it.marks > 1 ? 's' : '') + '</span>' +
       '</div>';
+
       if (it.kind === 'mcq') {
-        body += '<div class="q-opts" role="radiogroup">' +
+        body += '<div class="q-opts" role="radiogroup" aria-label="Options for question ' + it.num + '">' +
           it.opts.map(function (opt, oi) {
             return '<label class="q-opt" data-oi="' + oi + '"><input type="radio" name="q-' + si + '-' + it.num + '" value="' + oi + '"><span class="opt-letter">' + 'ABCD'[oi] + '.</span><span>' + esc(opt) + '</span></label>';
           }).join('') +
@@ -855,16 +973,21 @@
           it.model.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') +
         '</ul></div></details>';
       }
-      body += '<span class="q-chapter-tag">Chapter ' + (it.chapter + 1) + ' · ' + esc(shortTitle(chTitle, 42)) + '</span>';
+
+      body += '<div class="q-actions-row">' +
+        '<span class="q-chapter-tag">Chapter ' + (it.chapter + 1) + ' · ' + esc(chTitle) + '</span>' +
+        '<button type="button" class="q-explain-btn" data-qid="' + esc(it.id) + '">Explain with AI</button>' +
+      '</div>';
+
       return '<div class="question" data-qid="' + esc(it.id) + '">' + body + '</div>';
     }
 
     app.innerHTML =
       '<section class="shell page-view">' +
         '<div class="paper-wrap">' +
-          crumbs([{ label: 'Home', href: '#home' }, { label: 'Revision', href: '#revision' }, { label: paper.typeLabel }]) +
+          crumbs([{ label: 'Home', href: '#home' }, { label: 'Practice', href: '#revision' }, { label: paper.typeLabel }]) +
           '<div class="paper-toolbar">' +
-            '<a class="btn btn-soft btn-sm" href="#revision">← Change revision plan</a>' +
+            '<a class="btn btn-soft btn-sm" href="#revision">← Change plan</a>' +
             (hasMcq ? '<button class="btn btn-solid btn-sm" id="paper-check" type="button">Check answers</button>' : '') +
             '<button class="btn btn-soft btn-sm" id="paper-restart" type="button">Reset attempts</button>' +
             '<button class="btn btn-soft btn-sm" id="paper-print" type="button">Print paper</button>' +
@@ -872,7 +995,7 @@
           '<div class="score-banner" id="score-banner"></div>' +
           '<div class="paper-sheet">' +
             '<div class="paper-head">' +
-              '<span class="paper-brand">Commerce-Students · Original practice paper</span>' +
+              '<span class="paper-brand">Commerce-Students · Original Practice Paper</span>' +
               '<h1>' + esc(paper.title) + ' — ' + esc(paper.typeLabel) + '</h1>' +
               '<div class="paper-sub">' + esc(paper.extraNote) + '</div>' +
               '<div class="paper-meta-row">' +
@@ -889,33 +1012,49 @@
               '</div>';
             }).join('') +
             '<div class="paper-foot">' +
-              '<span>Questions are original, written from the official CBSE 2026–27 curriculum.</span>' +
-              '<span>Bookmark stars are saved on this device.</span>' +
+              '<span>Questions are original, written strictly from the official CBSE 2026–27 curriculum.</span>' +
+              '<span>Bookmark stars and mistakes are saved locally on this device.</span>' +
             '</div>' +
           '</div>' +
         '</div>' +
       '</section>';
   }
 
-  /* Delegated handlers — attached ONCE to #app so re-renders never
-     stack duplicate listeners (which would double-toggle bookmarks). */
+  /* Delegated clicks on #app for Paper, Bookmarks, and AI prompts */
   function qElFor(id) { return app.querySelector('.question[data-qid="' + id + '"]'); }
 
   app.addEventListener('click', function (e) {
     var t = e.target;
+
+    // Explain question with AI modal trigger
+    var expBtn = t.closest('.q-explain-btn');
+    if (expBtn) {
+      var qid = expBtn.getAttribute('data-qid');
+      openAIPromptModal('question', { qid: qid });
+      return;
+    }
+
+    // Bookmark toggle
     var bm = t.closest('.bm-btn');
     if (bm) {
       var id = bm.getAttribute('data-qid');
       var marks = loadJSON(STORAGE.bookmark, {}) || {};
       marks[id] = !marks[id];
       saveJSON(STORAGE.bookmark, marks);
-      bm.classList.toggle('on', !!marks[id]);
+      bm.classList.toggle('on', marks[id]);
       bm.textContent = marks[id] ? '★' : '☆';
-      var meta = document.getElementById('bm-meta');
-      if (meta) meta.textContent = Object.keys(marks).filter(function (k) { return marks[k]; }).length + ' bookmarked';
+      var bmMeta = document.getElementById('bm-meta');
+      if (bmMeta) {
+        var count = Object.keys(marks).filter(function (k) { return marks[k]; }).length;
+        bmMeta.textContent = count + ' bookmarked';
+      }
       return;
     }
-    if (t.closest('#paper-print')) { window.print(); return; }
+
+    // Print paper
+    if (t.closest('#paper-print')) { W.print(); return; }
+
+    // Reset attempts
     if (t.closest('#paper-restart')) {
       var paper = paperCtx.paper;
       if (!paper) return;
@@ -934,6 +1073,8 @@
       if (banner) banner.classList.remove('show');
       return;
     }
+
+    // Check answers
     if (t.closest('#paper-check')) { checkAnswers(); }
   });
 
@@ -951,79 +1092,674 @@
     var paper = paperCtx.paper;
     if (!paper) return;
     var score = 0, answered = 0, totalMcq = 0;
+    var mistakes = loadJSON(STORAGE.mistakes, {}) || {};
+    var chapterPerformance = {};
+
     paper.sections.forEach(function (sec, si) {
       sec.items.forEach(function (it) {
         if (it.kind !== 'mcq') return;
         totalMcq++;
+        var chKey = 'Chapter ' + (it.chapter + 1);
+        chapterPerformance[chKey] = chapterPerformance[chKey] || { total: 0, correct: 0 };
+        chapterPerformance[chKey].total++;
+
         var qEl = qElFor(it.id);
         if (!qEl) return;
         var picked = qEl.querySelector('input[type="radio"]:checked');
         var fb = document.getElementById('fb-' + si + '-' + it.num);
         qEl.classList.remove('correct', 'wrong');
         qEl.querySelectorAll('.q-opt').forEach(function (o) { o.classList.remove('opt-correct', 'opt-wrong'); });
+
         if (!picked) {
           if (fb) { fb.classList.remove('show'); fb.innerHTML = ''; }
           return;
         }
+
         answered++;
         var choice = Number(picked.value);
         if (choice === it.correct) {
           score++;
+          chapterPerformance[chKey].correct++;
           qEl.classList.add('correct');
           var okOpt = qEl.querySelector('.q-opt[data-oi="' + choice + '"]');
           if (okOpt) okOpt.classList.add('opt-correct');
-          if (fb) { fb.innerHTML = '<b>Correct</b>' + esc(it.exp || 'Well done.'); fb.classList.add('show'); }
+          if (fb) { fb.innerHTML = '<b>✓ Correct</b>' + esc(it.exp || 'Well done.'); fb.classList.add('show'); }
+          // Remove from mistakes if previously marked
+          if (mistakes[it.id]) delete mistakes[it.id];
         } else {
           qEl.classList.add('wrong');
           var badOpt = qEl.querySelector('.q-opt[data-oi="' + choice + '"]');
           var goodOpt = qEl.querySelector('.q-opt[data-oi="' + it.correct + '"]');
           if (badOpt) badOpt.classList.add('opt-wrong');
           if (goodOpt) goodOpt.classList.add('opt-correct');
-          if (fb) { fb.innerHTML = '<b>Not quite — correct option: ' + 'ABCD'[it.correct] + '</b>' + esc(it.exp || ''); fb.classList.add('show'); }
+          if (fb) { fb.innerHTML = '<b>✕ Incorrect — correct option: ' + 'ABCD'[it.correct] + '</b>' + esc(it.exp || ''); fb.classList.add('show'); }
+          // Save mistake
+          mistakes[it.id] = { grade: paper.spec.grade, subject: paper.spec.subject, chapter: it.chapter, q: it.q, correct: it.correct, exp: it.exp };
         }
       });
     });
+
+    saveJSON(STORAGE.mistakes, mistakes);
+
     var banner = document.getElementById('score-banner');
     if (!banner) return;
     var pct = totalMcq ? Math.round((score / totalMcq) * 100) : 0;
-    banner.innerHTML = '<div><strong>' + score + ' / ' + totalMcq + ' correct</strong><span class="score-detail"> · ' + pct + '%</span></div>' +
-      '<div class="score-detail">' + (totalMcq - answered) + ' unanswered · answers are marked on the questions</div>';
+
+    var weakChapters = Object.keys(chapterPerformance).filter(function (k) {
+      return chapterPerformance[k].correct < chapterPerformance[k].total;
+    });
+
+    banner.innerHTML =
+      '<div style="flex:1;">' +
+        '<strong>' + score + ' / ' + totalMcq + ' correct (' + pct + '%)</strong>' +
+        '<div class="score-detail">' + (totalMcq - answered) + ' unanswered · ' + (totalMcq - score) + ' mistakes automatically saved to your <a href="#study" style="text-decoration:underline;">Mistake Bank</a>.</div>' +
+        (weakChapters.length ? '<div style="margin-top:8px; font-size:12.5px; color:var(--muted);"><b>Topics to review:</b> ' + esc(weakChapters.join(', ')) + '</div>' : '') +
+      '</div>' +
+      '<div>' +
+        '<a class="btn btn-solid btn-sm" href="#study">Review in My Study →</a>' +
+      '</div>';
+
     banner.classList.add('show');
     if (banner.scrollIntoView) banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  /* ---------------- AI ---------------- */
+  /* ---------------- Timed Quiz Engine (All Subjects & Classes) ---------------- */
+
+  var quizTimer = null;
+  var quizState = null;
+
+  function stopQuizTimer() {
+    if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
+  }
+
+  function renderQuizSetup() {
+    setNavActive('quiz');
+    document.title = 'Timed Practice Quiz · Commerce-Students';
+    stopQuizTimer();
+
+    app.innerHTML =
+      '<section class="shell page-view">' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Timed Quiz' }]) +
+        '<div class="eyebrow">Timed Practice</div>' +
+        '<h1 class="page-title">Commerce Timed Quiz</h1>' +
+        '<p class="page-intro">Sharpen your speed and accuracy. Select class, subject, and time limit to attempt real CBSE-style MCQs under exam pressure.</p>' +
+        '<div class="rev-step" style="max-width:600px;">' +
+          '<div style="display:grid; gap:16px;">' +
+            '<div>' +
+              '<label style="display:block; font-weight:700; font-size:13.5px; margin-bottom:6px;">Select Class:</label>' +
+              '<select id="quiz-grade" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--card);">' +
+                '<option value="12">Class 12</option>' +
+                '<option value="11">Class 11</option>' +
+              '</select>' +
+            '</div>' +
+            '<div>' +
+              '<label style="display:block; font-weight:700; font-size:13.5px; margin-bottom:6px;">Select Subject:</label>' +
+              '<select id="quiz-subject" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--card);">' +
+                SUBJECTS.map(function (s) { return '<option value="' + s + '">' + esc(SUBJECT_NAMES[s]) + '</option>'; }).join('') +
+              '</select>' +
+            '</div>' +
+            '<div>' +
+              '<label style="display:block; font-weight:700; font-size:13.5px; margin-bottom:6px;">Number of Questions:</label>' +
+              '<select id="quiz-count" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--card);">' +
+                '<option value="10">10 Questions (5 Minutes)</option>' +
+                '<option value="15">15 Questions (8 Minutes)</option>' +
+                '<option value="20">20 Questions (10 Minutes)</option>' +
+              '</select>' +
+            '</div>' +
+            '<button class="btn btn-solid" id="start-quiz-btn" type="button" style="margin-top:8px;">Start Timed Quiz →</button>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+
+    document.getElementById('start-quiz-btn').addEventListener('click', function () {
+      var g = Number(document.getElementById('quiz-grade').value);
+      var s = document.getElementById('quiz-subject').value;
+      var count = Number(document.getElementById('quiz-count').value);
+      var b = bank(g, s);
+      if (!b) return;
+
+      var questions = [];
+      b.chapters.forEach(function (ch, ci) {
+        (ch.mcq || []).forEach(function (q, qi) {
+          questions.push({ q: q[0], opts: q[1], correct: q[2], exp: q[3], id: g + '-' + s + '-c' + ci + '-m' + qi, chTitle: ch.t });
+        });
+      });
+
+      // Shuffle
+      for (var i = questions.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var temp = questions[i]; questions[i] = questions[j]; questions[j] = temp;
+      }
+
+      var chosen = questions.slice(0, count);
+      var seconds = count === 10 ? 300 : (count === 15 ? 480 : 600);
+
+      quizState = {
+        grade: g,
+        subject: s,
+        questions: chosen,
+        at: 0,
+        answers: {},
+        seconds: seconds,
+        totalSeconds: seconds,
+        paused: false,
+        finished: false
+      };
+
+      runQuiz();
+    });
+  }
+
+  function formatTime(s) {
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function runQuiz() {
+    stopQuizTimer();
+    if (!quizState || !quizState.questions.length) { renderQuizSetup(); return; }
+    var q = quizState.questions[quizState.at];
+    var selected = quizState.answers[quizState.at];
+
+    app.innerHTML =
+      '<section class="shell page-view">' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Timed Quiz', href: '#quiz' }, { label: 'In Progress' }]) +
+        '<div class="paper-sheet" style="max-width:760px; margin:0 auto;">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:18px;">' +
+            '<div>' +
+              '<strong>Class ' + quizState.grade + ' ' + esc(SUBJECT_NAMES[quizState.subject]) + '</strong>' +
+              '<div style="font-size:12px; color:var(--muted);">Question ' + (quizState.at + 1) + ' of ' + quizState.questions.length + '</div>' +
+            '</div>' +
+            '<div style="font-size:24px; font-weight:800; color:' + (quizState.seconds < 60 ? 'var(--danger)' : 'var(--fg)') + ';" id="quiz-timer" aria-live="polite">' + formatTime(quizState.seconds) + '</div>' +
+          '</div>' +
+          '<div class="question" style="background:none; border:none; padding:0;">' +
+            '<div class="q-top">' +
+              '<span class="q-num">' + (quizState.at + 1) + '.</span>' +
+              '<span class="q-text" style="font-size:16px;">' + esc(q.q) + '</span>' +
+            '</div>' +
+            '<div class="q-opts" role="radiogroup" aria-label="Options">' +
+              q.opts.map(function (opt, oi) {
+                return '<label class="q-opt' + (selected === oi ? ' picked' : '') + '" data-oi="' + oi + '"><input type="radio" name="quiz-radio" value="' + oi + '" ' + (selected === oi ? 'checked' : '') + '><span class="opt-letter">' + 'ABCD'[oi] + '.</span><span>' + esc(opt) + '</span></label>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; padding-top:16px; border-top:1px solid var(--line);">' +
+            '<button class="btn btn-soft btn-sm" id="quiz-pause-btn" type="button">' + (quizState.paused ? 'Resume' : 'Pause') + '</button>' +
+            '<button class="btn btn-solid" id="quiz-next-btn" type="button">' + (quizState.at === quizState.questions.length - 1 ? 'Finish & Score →' : 'Next Question →') + '</button>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+
+    if (!quizState.paused && !quizState.finished) {
+      quizTimer = setInterval(function () {
+        quizState.seconds--;
+        var el = document.getElementById('quiz-timer');
+        if (el) {
+          el.textContent = formatTime(quizState.seconds);
+          if (quizState.seconds < 60) el.style.color = 'var(--danger)';
+        }
+        if (quizState.seconds <= 0) {
+          stopQuizTimer();
+          finishQuiz();
+        }
+      }, 1000);
+    }
+
+    var nextBtn = document.getElementById('quiz-next-btn');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        var picked = app.querySelector('input[name="quiz-radio"]:checked');
+        if (picked) quizState.answers[quizState.at] = Number(picked.value);
+        if (quizState.at === quizState.questions.length - 1) {
+          finishQuiz();
+        } else {
+          quizState.at++;
+          runQuiz();
+        }
+      });
+    }
+
+    var pauseBtn = document.getElementById('quiz-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', function () {
+        quizState.paused = !quizState.paused;
+        runQuiz();
+      });
+    }
+  }
+
+  function finishQuiz() {
+    stopQuizTimer();
+    quizState.finished = true;
+    var score = 0;
+    var mistakes = loadJSON(STORAGE.mistakes, {}) || {};
+
+    quizState.questions.forEach(function (q, i) {
+      if (quizState.answers[i] === q.correct) {
+        score++;
+      } else {
+        mistakes[q.id] = { grade: quizState.grade, subject: quizState.subject, chapter: 0, q: q.q, correct: q.correct, exp: q.exp };
+      }
+    });
+
+    saveJSON(STORAGE.mistakes, mistakes);
+
+    var scores = loadJSON(STORAGE.quizScores, []) || [];
+    scores.unshift({
+      date: new Date().toLocaleDateString(),
+      subject: SUBJECT_NAMES[quizState.subject],
+      grade: quizState.grade,
+      score: score,
+      total: quizState.questions.length
+    });
+    saveJSON(STORAGE.quizScores, scores.slice(0, 10));
+
+    var pct = Math.round((score / quizState.questions.length) * 100);
+
+    app.innerHTML =
+      '<section class="shell page-view">' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'Timed Quiz', href: '#quiz' }, { label: 'Result' }]) +
+        '<div class="paper-sheet" style="max-width:760px; margin:0 auto; text-align:center;">' +
+          '<div class="eyebrow" style="margin-bottom:8px;">Quiz Complete</div>' +
+          '<h1>Your Score: ' + score + ' / ' + quizState.questions.length + ' (' + pct + '%)</h1>' +
+          '<p style="color:var(--muted); margin:12px 0 24px;">Time spent: ' + formatTime(quizState.totalSeconds - quizState.seconds) + ' · Class ' + quizState.grade + ' ' + esc(SUBJECT_NAMES[quizState.subject]) + '</p>' +
+          '<div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">' +
+            '<a class="btn btn-solid" href="#quiz">Take Another Quiz</a>' +
+            '<a class="btn btn-soft" href="#study">Review My Mistakes</a>' +
+            '<a class="btn btn-soft" href="#class-' + quizState.grade + '/' + quizState.subject + '">Back to Subject</a>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+  }
+
+  /* ---------------- My Study & Bookmarks Dashboard ---------------- */
+
+  function renderStudy() {
+    setNavActive('study');
+    document.title = 'My Study & Saved Bookmarks · Commerce-Students';
+
+    var bookmarks = loadJSON(STORAGE.bookmark, {}) || {};
+    var mistakes = loadJSON(STORAGE.mistakes, {}) || {};
+    var scores = loadJSON(STORAGE.quizScores, []) || [];
+
+    var bmIds = Object.keys(bookmarks).filter(function (k) { return bookmarks[k]; });
+    var mistakeIds = Object.keys(mistakes);
+
+    // Calculate overall chapter completion
+    var totalChapters = 0, doneChapters = 0;
+    [11, 12].forEach(function (g) {
+      SUBJECTS.forEach(function (s) {
+        var b = bank(g, s);
+        if (b) {
+          totalChapters += b.chapters.length;
+          var chk = loadJSON(STORAGE.check + ':' + g + ':' + s, []) || [];
+          doneChapters += chk.filter(Boolean).length;
+        }
+      });
+    });
+    var overallPct = totalChapters ? Math.round((doneChapters / totalChapters) * 100) : 0;
+
+    app.innerHTML =
+      '<section class="shell page-view">' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'My Study' }]) +
+        '<div class="eyebrow">Personal Dashboard</div>' +
+        '<h1 class="page-title">My Study Workspace</h1>' +
+        '<p class="page-intro">Track your chapter progress, review saved exam questions, and practice items saved in your automatic mistake notebook.</p>' +
+        '<div class="study-stats-grid">' +
+          '<div class="stat-card"><strong>' + doneChapters + ' / ' + totalChapters + '</strong><span>Chapters Completed (' + overallPct + '%)</span></div>' +
+          '<div class="stat-card"><strong>' + bmIds.length + '</strong><span>Starred Bookmarks</span></div>' +
+          '<div class="stat-card"><strong>' + mistakeIds.length + '</strong><span>Mistakes to Review</span></div>' +
+        '</div>' +
+        '<div class="detail-grid">' +
+          '<section class="panel">' +
+            '<div class="panel-title"><h2>Saved Exam Questions (' + bmIds.length + ')</h2><button class="btn btn-ghost btn-sm" id="clear-bm-btn" type="button">Clear All</button></div>' +
+            '<div id="bm-list" style="display:grid; gap:10px;">' +
+              (bmIds.length ? bmIds.map(function (id) {
+                return '<div class="question" style="margin:0; padding:12px;">' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+                    '<span style="font-weight:700; font-size:13.5px;">Question ID: ' + esc(id) + '</span>' +
+                    '<button class="bm-btn on" data-qid="' + esc(id) + '" aria-label="Remove bookmark">★</button>' +
+                  '</div>' +
+                '</div>';
+              }).join('') : '<p style="color:var(--muted); font-size:13.5px;">No bookmarked questions yet. Star questions in any practice paper to save them here.</p>') +
+            '</div>' +
+          '</section>' +
+          '<aside>' +
+            '<div class="panel">' +
+              '<div class="panel-title"><h2>Mistake Bank (' + mistakeIds.length + ')</h2><button class="btn btn-ghost btn-sm" id="clear-mistakes-btn" type="button">Reset</button></div>' +
+              (mistakeIds.length ?
+                '<div style="display:grid; gap:8px;">' +
+                  mistakeIds.slice(0, 10).map(function (mid) {
+                    var m = mistakes[mid];
+                    return '<div style="padding:10px; border:1px solid var(--line); border-radius:8px; font-size:12.5px; background:var(--card);">' +
+                      '<strong>' + esc(m.q ? m.q.slice(0, 70) + '…' : mid) + '</strong>' +
+                      '<div style="color:var(--muted); font-size:11px; margin-top:4px;">' + esc(SUBJECT_NAMES[m.subject] || '') + ' · Class ' + m.grade + '</div>' +
+                    '</div>';
+                  }).join('') +
+                  (mistakeIds.length > 10 ? '<div style="font-size:11px; color:var(--muted);">+ ' + (mistakeIds.length - 10) + ' more mistakes saved.</div>' : '') +
+                  '<a class="btn btn-solid btn-sm" href="#revision" style="margin-top:10px;">Practice Custom Paper →</a>' +
+                '</div>' :
+                '<p style="color:var(--muted); font-size:13.5px;">Your mistake bank is empty! Any MCQs you miss in practice papers or timed quizzes will be automatically collected here.</p>') +
+            '</div>' +
+            '<div class="panel" style="margin-top:20px;">' +
+              '<div class="panel-title"><h2>Recent Timed Quizzes</h2></div>' +
+              (scores.length ?
+                scores.map(function (sc) {
+                  return '<div style="display:flex; justify-content:space-between; font-size:12.5px; border-bottom:1px solid var(--line); padding:6px 0;">' +
+                    '<span>' + esc(sc.subject) + ' (Class ' + sc.grade + ')</span>' +
+                    '<b>' + sc.score + ' / ' + sc.total + '</b>' +
+                  '</div>';
+                }).join('') : '<p style="color:var(--muted); font-size:12.5px;">No timed quizzes taken yet.</p>') +
+            '</div>' +
+          '</aside>' +
+        '</div>' +
+      '</section>';
+
+    var clearBm = document.getElementById('clear-bm-btn');
+    if (clearBm) {
+      clearBm.addEventListener('click', function () {
+        saveJSON(STORAGE.bookmark, {});
+        renderStudy();
+      });
+    }
+
+    var clearM = document.getElementById('clear-mistakes-btn');
+    if (clearM) {
+      clearM.addEventListener('click', function () {
+        saveJSON(STORAGE.mistakes, {});
+        renderStudy();
+      });
+    }
+  }
+
+  /* ---------------- AI Assistant Page & Prompt Builder ---------------- */
 
   function renderAI() {
     setNavActive('ai');
-    document.title = 'AI tools · Commerce-Students';
+    document.title = 'AI Study Assistant · Commerce-Students';
+
     app.innerHTML =
       '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'AI' }]) +
-        '<div class="eyebrow">Study with AI</div>' +
-        '<h1 class="page-title">Two AI tools, two jobs.</h1>' +
-        '<p class="page-intro">Both are free to start and open in a new tab. Use them together: clarify first, then turn your clarified notes into study material.</p>' +
+        crumbs([{ label: 'Home', href: '#home' }, { label: 'AI Assistant' }]) +
+        '<div class="eyebrow">Commerce AI Study Assistant</div>' +
+        '<h1 class="page-title">Contextual AI Study Workflows</h1>' +
+        '<p class="page-intro">Generate structured, syllabus-grounded academic prompts designed for learning. Copy prompt templates directly into Google Gemini, ChatGPT, or NotebookLM with zero logins or API keys.</p>' +
+        '<div class="rev-step" style="margin-bottom:24px;">' +
+          '<h3>Generate a Custom Commerce Study Prompt</h3>' +
+          '<p class="step-hint">Select a learning task to craft an academic prompt with CBSE answering criteria.</p>' +
+          '<div class="choice-grid cols-3" id="ai-task-grid">' +
+            '<button type="button" class="choice" data-task="concept">' +
+              '<strong>📖 Explain a Concept</strong>' +
+              '<small>Step-by-step conceptual clarity with practical numerical examples.</small>' +
+            '</button>' +
+            '<button type="button" class="choice" data-task="journal">' +
+              '<strong>₹ Journal & Balance Sheet Help</strong>' +
+              '<small>Debit/Credit reasoning and modern accounting adjustments.</small>' +
+            '</button>' +
+            '<button type="button" class="choice" data-task="casestudy">' +
+              '<strong>🏛️ Case Study Answering</strong>' +
+              '<small>Guidance using CBSE 3-step fact identification & quote method.</small>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="panel" style="margin-bottom:28px;">' +
+          '<div class="panel-title"><h2>Generated Academic Prompt</h2><button class="btn btn-soft btn-sm" id="copy-ai-prompt" type="button">Copy Prompt 📋</button></div>' +
+          '<textarea class="ai-prompt-box" id="ai-prompt-output" readonly rows="6"></textarea>' +
+          '<div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">' +
+            '<a class="btn btn-solid btn-sm" href="https://gemini.google.com/" target="_blank" rel="noreferrer">Open in Google Gemini ↗</a>' +
+            '<a class="btn btn-soft btn-sm" href="https://notebooklm.google.com/" target="_blank" rel="noreferrer">Open in NotebookLM ↗</a>' +
+            '<a class="btn btn-soft btn-sm" href="https://chatgpt.com/" target="_blank" rel="noreferrer">Open in ChatGPT ↗</a>' +
+          '</div>' +
+        '</div>' +
+        '<div class="section-head">' +
+          '<div><span class="eyebrow">Companion Tools</span><h2>Recommended External AI Tools</h2></div>' +
+        '</div>' +
         '<div class="ai-grid">' +
           '<a class="ai-card" href="https://gemini.google.com/" target="_blank" rel="noreferrer">' +
             '<span class="ai-logo" aria-hidden="true">' + ICONS.gemini + '</span>' +
-            '<span class="ai-for">For doubts</span>' +
+            '<span class="ai-for">For concept doubts & problem solving</span>' +
             '<h3>Google Gemini</h3>' +
-            '<p class="ai-desc">Stuck on a concept, a format or a tricky question? Ask Gemini a specific question from your chapter and get a step-by-step explanation you can check against your textbook and notes.</p>' +
-            '<span class="ai-use">Best for: concept doubts · worked examples · checking your own answers</span>' +
-            '<span class="btn btn-solid">Open Gemini ↗</span>' +
+            '<p class="ai-desc">Ideal for asking specific doubt breakdowns and verifying balance sheet calculations. Free to use with your Google account.</p>' +
+            '<span class="btn btn-soft btn-sm">Launch Gemini ↗</span>' +
           '</a>' +
           '<a class="ai-card" href="https://notebooklm.google.com/" target="_blank" rel="noreferrer">' +
             '<span class="ai-logo" aria-hidden="true">' + ICONS.notebooklm + '</span>' +
-            '<span class="ai-for">For making notes</span>' +
+            '<span class="ai-for">For lecture notes & audio revision</span>' +
             '<h3>Google NotebookLM</h3>' +
-            '<p class="ai-desc">Paste in your chapter notes, summaries or syllabus points and let NotebookLM turn them into study material — organised notes, flashcards, question-and-answer sets and audio overviews you can listen to.</p>' +
-            '<span class="ai-use">Best for: making notes · flashcards · audio revision packs</span>' +
-            '<span class="btn btn-solid">Open NotebookLM ↗</span>' +
+            '<p class="ai-desc">Paste your chapter summaries or notes into NotebookLM to generate instant flashcards, study guides, and audio discussions.</p>' +
+            '<span class="btn btn-soft btn-sm">Launch NotebookLM ↗</span>' +
           '</a>' +
         '</div>' +
-        '<div class="ai-tip"><b>How students use both:</b> resolve your doubts with Gemini first, then feed the clarified notes into NotebookLM to build a revision pack for the night before the exam. Both tools work best with specific inputs — “Explain the BRS with a numerical” beats “teach me accountancy”.</div>' +
       '</section>';
+
+    var promptBox = document.getElementById('ai-prompt-output');
+
+    function setPrompt(task) {
+      var txt = '';
+      if (task === 'journal') {
+        txt = "I am a CBSE Class 12 Accountancy student. Please guide me step-by-step through this transaction:\n[Paste transaction here]\n\nDo not just give the final answer. Follow this pedagogy:\n1. Identify the accounts involved (Asset, Liability, Capital, Revenue, Expense)\n2. Apply the Modern Rules of Debit and Credit\n3. Provide the journal entry with full narration\n4. Show the ledger posting and balance sheet impact.";
+      } else if (task === 'casestudy') {
+        txt = "I am preparing for CBSE Class 12 Business Studies. Here is a case study:\n[Paste case text here]\n\nPlease help me answer according to the official CBSE 3-step evaluation criteria:\n1. Identify the concept/principle mentioned\n2. Quote the exact lines from the passage that support this identification\n3. Explain the concept and state 2 related merits or features.";
+      } else {
+        txt = "I am a CBSE Commerce student revising [Subject / Topic]. Please explain this concept:\n1. Provide the formal definition/formula\n2. Give a real-world business example from the Indian economy\n3. Detail common mistakes students make in CBSE board exams on this topic\n4. Give me one practice question to test my understanding.";
+      }
+      promptBox.value = txt;
+    }
+
+    setPrompt('concept');
+
+    var grid = document.getElementById('ai-task-grid');
+    if (grid) {
+      grid.addEventListener('click', function (e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        var t = btn.getAttribute('data-task');
+        grid.querySelectorAll('.choice').forEach(function (c) { c.classList.remove('selected'); });
+        btn.classList.add('selected');
+        setPrompt(t);
+      });
+    }
+
+    var copyBtn = document.getElementById('copy-ai-prompt');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        promptBox.select();
+        try {
+          navigator.clipboard.writeText(promptBox.value);
+          copyBtn.textContent = 'Copied! ✓';
+          setTimeout(function () { copyBtn.textContent = 'Copy Prompt 📋'; }, 2000);
+        } catch (err) {
+          copyBtn.textContent = 'Selected (Ctrl+C)';
+        }
+      });
+    }
   }
+
+  /* ---------------- Global AI Prompt Modal ("Explain with AI") ---------------- */
+
+  var aiModal = document.getElementById('ai-modal');
+  var aiModalBody = document.getElementById('ai-modal-body');
+  var aiModalClose = document.getElementById('ai-modal-close');
+
+  function openAIPromptModal(type, meta) {
+    if (!aiModal || !aiModalBody) return;
+    var promptText = '';
+
+    if (type === 'question') {
+      var item = null;
+      if (paperCtx && paperCtx.paper) {
+        paperCtx.paper.sections.forEach(function (sec) {
+          sec.items.forEach(function (it) {
+            if (it.id === meta.qid) item = it;
+          });
+        });
+      }
+      if (item) {
+        promptText = "I am a CBSE Class " + (paperCtx.spec.grade || 12) + " Commerce student studying " + SUBJECT_NAMES[paperCtx.spec.subject] + ".\n\n" +
+          "Here is an exam question I am practicing:\n\"" + item.q + "\"\n\n";
+        if (item.kind === 'mcq') {
+          promptText += "Options:\n" + item.opts.map(function (o, i) { return 'ABCD'[i] + '. ' + o; }).join('\n') + "\n\n";
+          promptText += "The answer key states: Option " + 'ABCD'[item.correct] + " (" + item.opts[item.correct] + ").\n\n";
+          promptText += "Please teach me:\n1. Why is Option " + 'ABCD'[item.correct] + " correct?\n2. Why are the other options incorrect?\n3. What is the underlying syllabus concept and what rule must I remember for my board exam?";
+        } else {
+          promptText += "Model Answer Points:\n" + item.model.join('\n') + "\n\n";
+          promptText += "Please explain these model points simply and give me a memorable mnemonic or structure to score full marks on this question.";
+        }
+      } else {
+        promptText = "I need help with this question ID: " + meta.qid;
+      }
+    } else if (type === 'chapter') {
+      var b = bank(meta.grade, meta.subject);
+      var ch = b && b.chapters[meta.chapterIndex];
+      promptText = "I am studying CBSE Class " + meta.grade + " " + SUBJECT_NAMES[meta.subject] + ".\n" +
+        "Chapter: " + (ch ? ch.t : 'Selected Chapter') + "\n\n" +
+        "Please provide a 15-minute quick revision guide:\n" +
+        "1. Top 5 most frequently tested concepts in CBSE exams\n" +
+        "2. Essential formulas or definitions\n" +
+        "3. Three high-yield practice questions with answer outlines.";
+    }
+
+    aiModalBody.innerHTML =
+      '<textarea class="ai-prompt-box" id="ai-modal-textarea" rows="7" readonly>' + esc(promptText) + '</textarea>' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; flex-wrap:wrap; gap:10px;">' +
+        '<button class="btn btn-solid btn-sm" id="ai-modal-copy-btn" type="button">Copy Prompt 📋</button>' +
+        '<div style="display:flex; gap:8px;">' +
+          '<a class="btn btn-soft btn-sm" href="https://gemini.google.com/" target="_blank" rel="noreferrer">Open Gemini ↗</a>' +
+          '<a class="btn btn-soft btn-sm" href="https://chatgpt.com/" target="_blank" rel="noreferrer">Open ChatGPT ↗</a>' +
+        '</div>' +
+      '</div>';
+
+    aiModal.classList.add('open');
+
+    var copyBtn = document.getElementById('ai-modal-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        var box = document.getElementById('ai-modal-textarea');
+        box.select();
+        try {
+          navigator.clipboard.writeText(box.value);
+          copyBtn.textContent = 'Copied! ✓';
+          setTimeout(function () { copyBtn.textContent = 'Copy Prompt 📋'; }, 2000);
+        } catch (e) {
+          copyBtn.textContent = 'Selected (Ctrl+C)';
+        }
+      });
+    }
+  }
+
+  if (aiModalClose) {
+    aiModalClose.addEventListener('click', function () {
+      aiModal.classList.remove('open');
+    });
+  }
+
+  /* ---------------- Global Search Engine & Modal ---------------- */
+
+  var searchModal = document.getElementById('search-modal');
+  var searchInput = document.getElementById('global-search-input');
+  var searchResults = document.getElementById('global-search-results');
+  var searchClose = document.getElementById('search-close');
+  var searchTrigger = document.getElementById('search-trigger');
+
+  function allIndexItems() {
+    var items = [];
+    [11, 12].forEach(function (g) {
+      SUBJECTS.forEach(function (s) {
+        var b = bank(g, s);
+        if (!b) return;
+        b.chapters.forEach(function (ch, ci) {
+          items.push({
+            type: 'chapter',
+            title: ch.t,
+            grade: g,
+            subject: s,
+            ci: ci,
+            href: '#class-' + g + '/' + s
+          });
+          (ch.mcq || []).forEach(function (q) {
+            items.push({
+              type: 'question',
+              title: q[0],
+              grade: g,
+              subject: s,
+              ci: ci,
+              href: '#class-' + g + '/' + s
+            });
+          });
+        });
+      });
+    });
+    return items;
+  }
+
+  var searchIndex = null;
+
+  function openSearch() {
+    if (!searchModal) return;
+    if (!searchIndex) searchIndex = allIndexItems();
+    searchModal.classList.add('open');
+    if (searchInput) {
+      searchInput.value = '';
+      searchInput.focus();
+      paintSearchResults('');
+    }
+  }
+
+  function closeSearch() {
+    if (searchModal) searchModal.classList.remove('open');
+  }
+
+  function paintSearchResults(query) {
+    if (!searchResults) return;
+    var q = query.toLowerCase().trim();
+    var filtered = (searchIndex || []).filter(function (it) {
+      if (!q) return it.type === 'chapter';
+      return it.title.toLowerCase().indexOf(q) !== -1 ||
+        SUBJECT_NAMES[it.subject].toLowerCase().indexOf(q) !== -1 ||
+        ('class ' + it.grade).indexOf(q) !== -1;
+    }).slice(0, 40);
+
+    if (!filtered.length) {
+      searchResults.innerHTML = '<p style="color:var(--muted); font-size:13px; padding:12px;">No matching chapters or questions found.</p>';
+      return;
+    }
+
+    searchResults.innerHTML = filtered.map(function (it) {
+      return '<a class="search-item" href="' + it.href + '">' +
+        '<div>' +
+          '<strong style="font-size:13.5px;">' + esc(it.title.slice(0, 80)) + (it.title.length > 80 ? '…' : '') + '</strong>' +
+          '<div><small>Class ' + it.grade + ' · ' + esc(SUBJECT_NAMES[it.subject]) + (it.type === 'chapter' ? ' (Chapter)' : ' (Question)') + '</small></div>' +
+        '</div>' +
+        '<span>→</span>' +
+      '</a>';
+    }).join('');
+  }
+
+  if (searchTrigger) searchTrigger.addEventListener('click', openSearch);
+  if (searchClose) searchClose.addEventListener('click', closeSearch);
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function (e) {
+      paintSearchResults(e.target.value);
+    });
+  }
+
+  if (searchResults) {
+    searchResults.addEventListener('click', function (e) {
+      if (e.target.closest('a')) closeSearch();
+    });
+  }
+
+  // Keyboard shortcut Ctrl+K
+  window.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openSearch();
+    }
+    if (e.key === 'Escape') {
+      closeSearch();
+      if (aiModal) aiModal.classList.remove('open');
+    }
+  });
 
   /* ---------------- router ---------------- */
 
@@ -1032,6 +1768,8 @@
     if (raw === '' || raw === 'home') return { type: 'home' };
     if (raw === 'classes') return { type: 'classes' };
     if (raw === 'revision') return { type: 'revision' };
+    if (raw === 'quiz') return { type: 'quiz' };
+    if (raw === 'study' || raw === 'bookmarks') return { type: 'study' };
     if (raw === 'ai') return { type: 'ai' };
     if (raw === 'paper') return { type: 'paper' };
     var m = raw.match(/^class-(11|12)(?:\/([a-z]+))?$/);
@@ -1040,22 +1778,26 @@
   }
 
   function onHash() {
-    // #revision/preset/<grade>/<subject> → apply preset, normalise the hash
     var m = (location.hash || '').match(/^#revision\/preset\/(11|12)\/([a-z]+)/);
     var preset = m ? m[1] + ':' + m[2] : null;
     if (preset && location.hash !== '#revision') {
-      try { history.replaceState(null, '', '#revision'); } catch (err) { /* very old browsers */ }
+      try { history.replaceState(null, '', '#revision'); } catch (err) {}
     }
     menuOpen = false;
     paintMenu();
+    stopQuizTimer();
+
     var route = getRoute();
     if (route.type === 'class') renderClass(route.grade);
     else if (route.type === 'subject') renderSubject(route.grade, route.key);
     else if (route.type === 'classes') renderClasses();
     else if (route.type === 'revision') renderRevision(preset);
+    else if (route.type === 'quiz') renderQuizSetup();
+    else if (route.type === 'study') renderStudy();
     else if (route.type === 'ai') renderAI();
     else if (route.type === 'paper') renderPaper();
     else renderHome();
+
     window.scrollTo(0, 0);
   }
 
