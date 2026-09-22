@@ -9,6 +9,7 @@ const KEYS = {
   theme: PREFIX+"theme",
   daily10: PREFIX+"daily10",
   bookmarks: PREFIX+"bookmarks",
+  apiKey: PREFIX+"apiKey",
 };
 
 function load(key, fallback){
@@ -208,5 +209,10 @@ export function getDaily10(){
 export function setDaily10(data){
   save(KEYS.daily10,{...data, date:new Date().toISOString().slice(0,10)});
 }
+
+// API Key (for Gemini / Pollinations) - stored locally only, never committed
+export function getApiKey(){ try{ const raw=localStorage.getItem(KEYS.apiKey); return raw? JSON.parse(raw):"" }catch{ return "" } }
+export function setApiKey(k){ try{ localStorage.setItem(KEYS.apiKey, JSON.stringify(k||"")); }catch{} }
+export function clearApiKey(){ try{ localStorage.removeItem(KEYS.apiKey); }catch{} }
 
 export const STORAGE_KEYS = KEYS;

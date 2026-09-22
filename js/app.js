@@ -1525,7 +1525,18 @@ function pageAI(){
     ${breadcrumbs([{label:"Home",href:"#home"},{label:"AI Study Assistant"}])}
     <span class="eyebrow">AI Study Assistant · Live — Pollinations free</span>
     <h1 class="page-title">Your Commerce tutor — real AI.</h1>
-    <p class="page-intro">Context-aware help for the chapter you're studying. <b>Live AI</b> powered by <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no API key, no signup). Responses are real — not canned demos. If offline, we fall back to a local explanation.</p>
+    <p class="page-intro">Context-aware help for the chapter you're studying. <b>Live AI</b> powered by <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key) + <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">Gemini</a> (free key, more reliable). Responses are real — not canned demos. If offline, we fall back to a chapter-specific explanation.</p>
+    <div class="card" style="margin-top:14px;background:var(--card-2);border:1px dashed var(--line)">
+      <strong style="font-size:13px">Live AI key (optional but recommended)</strong>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 8px">For <b>reliable live AI</b> add a free Gemini key (AIza...) from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> — free, no credit card, 1-min. Or a Pollinations key (pk_/sk_) from <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">enter.pollinations.ai</a>. Stored locally only, never sent to our server.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <input id="ai-key-input" type="password" placeholder="Paste Gemini (AIza...) or Pollinations (pk_/sk_...) key" value="${esc(Store.getApiKey? Store.getApiKey() : "")}" style="flex:1;min-width:240px;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--card)">
+        <button class="btn btn-primary" id="save-ai-key">Save key</button>
+        <button class="btn" id="clear-ai-key">Clear</button>
+        <button class="btn" id="test-ai-key">Test live AI</button>
+      </div>
+      <div id="ai-key-status" style="margin-top:8px;font-size:12px;color:var(--muted)">${(Store.getApiKey && Store.getApiKey()) ? `Saved: ${esc(Store.getApiKey().slice(0,6))}**** · <span style="color:var(--success)">Live AI will use your key (most reliable)</span>` : `No key saved · Using free Pollinations (rate-limited, may fallback). <b>Tip:</b> Add Gemini key for instant live responses.`}</div>
+    </div>
 
     <div class="card" style="margin-top:14px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:var(--accent-soft)">
       <div>
@@ -1594,36 +1605,90 @@ function pageAI(){
   </section>`;
 }
 // --- Real AI via Pollinations (free, no key) ---
+async function fetchGemini(prompt, apiKey){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      contents: [{parts:[{text: prompt}]}],
+      generationConfig: {temperature: 0.7, maxOutputTokens: 900}
+    })
+  });
+  if(!r.ok){
+    const err = await r.text().catch(()=> "");
+    throw new Error(`Gemini HTTP ${r.status}: ${err.slice(0,200)}`);
+  }
+  const j = await r.json();
+  const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if(!text || text.trim().length < 10) throw new Error("Empty Gemini response");
+  return text.trim();
+}
+
+async function fetchPollinationsWithKey(prompt, apiKey, ctrl){
+  const url = "https://gen.pollinations.ai/v1/chat/completions";
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${apiKey}`},
+    signal: ctrl.signal,
+    body: JSON.stringify({
+      model: "openai",
+      messages: [{role:"user", content: prompt}],
+      stream: false,
+      temperature: 0.7
+    })
+  });
+  if(!r.ok) throw new Error(`Pollinations key HTTP ${r.status}`);
+  const j = await r.json();
+  const content = j?.choices?.[0]?.message?.content || "";
+  if(!content || content.trim().length < 10) throw new Error("Empty Pollinations key response");
+  return content.trim();
+}
+
 async function fetchPollinations(prompt){
+  const apiKey = (Store.getApiKey && Store.getApiKey() || "").trim();
   const ctrl = new AbortController();
   const tid = setTimeout(()=> ctrl.abort(), 18000);
-  // Try POST to /openai (reliable for long prompts, no URL length limit)
   try{
-    const r = await fetch("https://text.pollinations.ai/openai", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        model: "openai",
-        messages: [{role:"user", content: prompt}],
-        stream: false,
-        temperature: 0.7
-      })
-    });
-    if(r.ok){
-      const j = await r.json().catch(()=>null);
-      const content = j?.choices?.[0]?.message?.content || j?.choices?.[0]?.text || "";
-      if(content && content.trim().length > 10){
+    if(apiKey && apiKey.startsWith("AIza")){
+      const txt = await fetchGemini(prompt, apiKey);
+      clearTimeout(tid);
+      return txt;
+    }
+    if(apiKey && (apiKey.startsWith("sk_") || apiKey.startsWith("pk_"))){
+      try{
+        const txt = await fetchPollinationsWithKey(prompt, apiKey, ctrl);
         clearTimeout(tid);
-        return content.trim();
+        return txt;
+      }catch(e){
+        console.warn("Pollinations with key failed, falling back to free", e);
       }
     }
-  }catch(e){
-    console.warn("Pollinations POST failed, trying GET", e);
-  }
-  // Fallback GET (short prompt slice to avoid URI too long)
-  try{
-    const shortPrompt = prompt.slice(0, 1200);
+    try{
+      const r = await fetch("https://text.pollinations.ai/openai", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          model: "openai",
+          messages: [{role:"user", content: prompt}],
+          stream: false,
+          temperature: 0.7
+        })
+      });
+      if(r.ok){
+        const j = await r.json().catch(()=>null);
+        const content = j?.choices?.[0]?.message?.content || j?.choices?.[0]?.text || "";
+        if(content && content.trim().length > 10){
+          clearTimeout(tid);
+          return content.trim();
+        }
+      }
+      console.warn("Pollinations free POST empty, trying GET");
+    }catch(e){
+      console.warn("Pollinations POST failed, trying GET", e);
+    }
+    const shortPrompt = prompt.slice(0, 1100);
     const url = `https://text.pollinations.ai/${encodeURIComponent(shortPrompt)}?model=openai`;
     const r2 = await fetch(url, {signal: ctrl.signal});
     clearTimeout(tid);
@@ -1631,8 +1696,9 @@ async function fetchPollinations(prompt){
     const txt = await r2.text();
     if(!txt || txt.trim().length < 10) throw new Error("Empty response");
     return txt.trim();
-  }finally{
+  }catch(e){
     clearTimeout(tid);
+    throw e;
   }
 }
 
@@ -1677,9 +1743,16 @@ function buildAIPrompt(mode, input, context){
   return `You are Commerce-Students AI, expert CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${topicPoints}. Task: ${modeInstr} User question: "${safeQ}" Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff.`;
 }
 
+function apiKeyMsg(){
+  const k = (Store.getApiKey && Store.getApiKey() || "").trim();
+  if(k) return `Key: ${esc(k.slice(0,4))}****${esc(k.slice(-4))} ·`;
+  return `No API key saved · <a href="#profile" style="text-decoration:underline">Add free Gemini key in Profile</a> ·`;
+}
+
 async function aiGenerate(mode, input, context){
   const ch = getChapters(context.class, context.subject)[context.chapter];
   const chapterName = ch ? ch.title : "this chapter";
+  const subjectName = SUBJECT_NAMES[context.subject] || context.subject;
   const cls = context.class;
   const qText = input ? `<p style="color:var(--muted);font-size:12px;margin-bottom:8px"><b>Your question:</b> ${esc(input)}</p>` : "";
   const header = `<span class="badge badge-primary">Live AI · ${esc(mode||"explain")} · ${esc(chapterName)} · Class ${cls}</span>${qText}`;
@@ -1690,15 +1763,22 @@ async function aiGenerate(mode, input, context){
     return `${header}<div style="margin-top:10px">${formatted}</div><p style="margin-top:10px;color:var(--muted);font-size:11px">Live response via <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key) · Model: openai · Context: ${esc(chapterName)} · Verify with textbook.</p>`;
   }catch(err){
     console.warn("Pollinations failed, fallback demo", err);
+    const chPoints = (ch && ch.keyPoints ? ch.keyPoints.slice(0,2).join(" · ") : "See textbook");
+    const topicHint = ch ? `Key points: ${esc(chPoints)}` : "";
+    const dynamicExplain = `<p><b>${esc(chapterName)}</b> — ${esc(subjectName)} (Class ${cls})</p><p style="font-size:13.5px">${topicHint}</p><p style="font-size:13.5px">This is a <b>context-aware offline explanation</b> for <b>${esc(chapterName)}</b>. Live AI is temporarily unavailable, so here's a structured revision:</p><ul style="font-size:13.5px;margin:8px 0 0 18px"><li><b>Definition:</b> ${esc((ch && ch.keyPoints && ch.keyPoints[0]) || "Refer to NCERT definition for "+chapterName)}</li><li><b>Why it matters:</b> Frequently asked in CBSE 2026-27 — show keywords, formula and example.</li><li><b>How to answer:</b> Keyword → explanation → formula/example → exam tip.</li></ul><div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px"><b>Exam tip:</b> Write formula → substitution → answer with unit. Mention chapter name <b>${esc(chapterName)}</b> explicitly.</div>${input? `<p style="margin-top:10px;color:var(--muted);font-size:12px"><b>Your question:</b> ${esc(input)}</p>`: ""}`;
+    const dynamicSolve = `<p><b>Solving for ${esc(chapterName)}</b> — ${esc(subjectName)}</p><p style="font-size:13.5px">Steps: <b>Given → Formula → Substitution → Answer</b>. ${topicHint}</p><p style="font-size:13.5px"><b>Example pattern:</b> For numericals in ${esc(chapterName)}, always adjust for abnormal items first, then apply the standard formula from your formula bank.</p>`;
     const fallbackBase = {
-      explain: `<p>Goodwill is the value of a firm's reputation that lets it earn more than normal profits. It's an intangible asset, valuable only when profitable. Calculate Average Profit → Normal Profit (Capital×Rate/100) → Super Profit (Average−Normal) → Goodwill (Super×Purchase). <b>Exam tip:</b> Show formula → substitution → answer.</p>`,
-      solve: `<p><b>Example:</b> Profits 40k,50k,60k,35k,65k → Average 50k → Goodwill at 2 years' purchase = 1,00,000. <b>Formula:</b> Goodwill = Average Profit × Years' purchase.</p>`,
-      "check-answer": `<p>Thanks for sharing! <b>✓</b> You used correct keyword. <b>⚠ Missing:</b> Mention intangible, methods (Average/Super/Capitalisation). <b>Suggested:</b> "Goodwill is the value of reputation expected over normal profits, valued by Average/Super/Capitalisation methods."</p>`,
-      hint: `<p>Hint: Start with <b>Average Profit → Normal Profit → Super Profit</b>. What is average here?</p>`,
-      simplify: `<p><b>Goodwill = extra earning reputation.</b> Avg = total/years. Super = Avg−Normal. Goodwill = Super×purchase.</p>`
+      explain: dynamicExplain,
+      solve: dynamicSolve,
+      "check-answer": `<p>Thanks for sharing! <b>✓</b> You attempted <b>${esc(chapterName)}</b>. <b>⚠ Missing:</b> Add keywords from: ${esc(chPoints)}. <br><b>Suggested structure:</b> Definition (keyword) → 2 points → example. <b>Your answer:</b> "${esc(input||"")}"</p>`,
+      hint: `<p>Hint for <b>${esc(chapterName)}</b>: Start with the definition, then ask: <i>What is the formula / key term here?</i> ${topicHint}</p>`,
+      simplify: `<p><b>${esc(chapterName)} — 30-sec:</b> ${esc(chPoints)} — remember formula → example.</p>`,
+      "quiz-me": `<p><b>Quick quiz — ${esc(chapterName)}</b> (offline)</p><ol style="font-size:13.5px"><li>Define the main term of ${esc(chapterName)} in one sentence.</li><li>State one formula / feature from ${esc(chapterName)}.</li><li>Give one common mistake in ${esc(chapterName)}.</li></ol><p style="color:var(--muted);font-size:12px">Live quiz available when AI is online — these are offline placeholders.</p>`,
+      "teach-me": `<p><b>Let's learn ${esc(chapterName)} together.</b> Offline mode: Tell me what you think <b>${esc(chapterName)}</b> means, then I'll guide you (live teacher mode needs AI online).</p>`,
+      examiner: `<p><b>Examiner Mode — ${esc(chapterName)} (offline)</b>: Must write keywords from ${esc(chPoints)}, formula, substitution, answer. No marks for only final answer.</p>`
     };
     const demo = fallbackBase[mode] || fallbackBase.explain;
-    return `${header}<div style="margin-top:10px;font-size:13.5px;line-height:1.6">${demo}</div><div style="margin-top:8px;padding:10px;border:1px dashed var(--warning);background:var(--warning-soft);border-radius:10px;font-size:12px"><b>Note:</b> Live AI was temporarily unavailable — showing offline fallback. Your question was: ${esc(input||mode)}. Try again in a moment for a fresh AI answer.</div>`;
+    return `${header}<div style="margin-top:10px;font-size:13.5px;line-height:1.6">${demo}</div><div style="margin-top:8px;padding:10px;border:1px dashed var(--warning);background:var(--warning-soft);border-radius:10px;font-size:12px"><b>Note:</b> Live AI was temporarily unavailable — showing offline fallback for <b>${esc(chapterName)}</b>. ${apiKeyMsg()} Your question was: ${esc(input||mode)}. Try again in a moment or add a Gemini key in Profile for instant live AI.</div>`;
   }
 }
 
@@ -2033,6 +2113,17 @@ function pageProfile(){
       </div>
     </div>
 
+    <div class="card" style="margin-top:16px">
+      <h3>Live AI API key</h3>
+      <p style="color:var(--muted);font-size:13px">Add a free Gemini key for reliable live AI. Get it free at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> (no credit card). Or Pollinations key at <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">enter.pollinations.ai</a>. Key is stored locally in your browser only.</p>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <input id="profile-key-input" type="password" placeholder="AIza... or pk_/sk_..." value="${esc(Store.getApiKey? Store.getApiKey() : "")}" style="flex:1;min-width:240px;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--card)">
+        <button class="btn btn-primary" id="profile-save-key">Save key</button>
+        <button class="btn" id="profile-clear-key">Clear</button>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:var(--muted)">${(Store.getApiKey && Store.getApiKey()) ? `Saved: ${esc(Store.getApiKey().slice(0,6))}**** · Live AI active` : `No key saved · Free Pollinations will be used (may be rate-limited).`}</div>
+      <div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;font-size:12px"><b>Free Gemini key in 30 sec:</b> 1) Open <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> → 2) Sign in with Google → 3) <b>Create API key</b> → 4) Copy <b>AIza...</b> → 5) Paste here → Save. Same key works on all devices (paste again).</div>
+    </div>
     <div class="card" style="margin-top:16px">
       <h3>Study plan</h3>
       <p style="color:var(--muted);font-size:13px">Generate a realistic weekly schedule from your exam date and daily time.</p>
@@ -2592,6 +2683,41 @@ function handleClick(e){
       const inp=$("#ai-input");
       if(inp) inp.value=q.question;
     },200);
+    return;
+  }
+  // --- API key handlers (AI page + Profile) ---
+  if(target.id==="save-ai-key" || target.id==="profile-save-key"){
+    const inp = document.getElementById("ai-key-input") || document.getElementById("profile-key-input");
+    const val = (inp?.value || document.getElementById("profile-key-input")?.value || "").trim();
+    if(!val){ toast("Paste a key first (AIza... or pk_/sk_...)"); return; }
+    if(!(val.startsWith("AIza") || val.startsWith("pk_") || val.startsWith("sk_"))){
+      toast("Key should start with AIza (Gemini) or pk_/sk_ (Pollinations)");
+    }
+    Store.setApiKey(val);
+    toast("API key saved locally ✓ Live AI will use it");
+    render();
+    return;
+  }
+  if(target.id==="clear-ai-key" || target.id==="profile-clear-key"){
+    Store.clearApiKey();
+    toast("API key cleared — using free Pollinations");
+    render();
+    return;
+  }
+  if(target.id==="test-ai-key"){
+    const out=document.getElementById("ai-output");
+    if(out){
+      out.innerHTML=`<div class="skeleton" style="height:18px;width:60%"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div>`;
+      (async ()=>{
+        const testPrompt = "Hello! Reply with 'Live AI test ok - ' + today's date in one short sentence.";
+        try{
+          const res = await fetchPollinations(testPrompt);
+          out.innerHTML = `<span class="badge badge-success">Live AI test ✓</span><div style="margin-top:10px;font-size:13.5px">${formatAIText(res)}</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Key works! ${esc((Store.getApiKey()||"").slice(0,6))}****</p>`;
+        }catch(e){
+          out.innerHTML = `<span class="badge badge-danger">Live AI test failed</span><p style="color:var(--danger);font-size:13px;margin-top:8px">${esc(e.message)}</p><p style="color:var(--muted);font-size:12px">Free Pollinations may be rate-limited. Add a free Gemini key from aistudio.google.com/app/apikey for reliable tests.</p>`;
+        }
+      })();
+    }
     return;
   }
 }
