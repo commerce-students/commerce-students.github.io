@@ -1523,9 +1523,9 @@ function pageAI(){
   return `
   <section class="shell page">
     ${breadcrumbs([{label:"Home",href:"#home"},{label:"AI Study Assistant"}])}
-    <span class="eyebrow">AI Study Assistant · Offline demo</span>
-    <h1 class="page-title">Your Commerce tutor — exam-oriented.</h1>
-    <p class="page-intro">Context-aware help for the chapter you're studying. Offline demo: no API key needed, answers are rule-based and clearly labeled. For real AI, connect a backend later.</p>
+    <span class="eyebrow">AI Study Assistant · Live — Pollinations free</span>
+    <h1 class="page-title">Your Commerce tutor — real AI.</h1>
+    <p class="page-intro">Context-aware help for the chapter you're studying. <b>Live AI</b> powered by <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no API key, no signup). Responses are real — not canned demos. If offline, we fall back to a local explanation.</p>
 
     <div class="card" style="margin-top:14px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:var(--accent-soft)">
       <div>
@@ -1567,7 +1567,7 @@ function pageAI(){
           <textarea id="ai-input" placeholder="E.g. Explain goodwill super profit method with example" style="width:100%;min-height:90px;margin-top:6px;padding:12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card)"></textarea>
           <div class="row" style="margin-top:10px">
             <button class="btn btn-primary" id="ai-ask">Ask AI →</button>
-            <span style="color:var(--muted);font-size:12px">Demo responses only · Not a substitute for teacher/textbook</span>
+            <span style="color:var(--muted);font-size:12px">Live AI · Powered by Pollinations (free) · Not a substitute for teacher/textbook</span>
           </div>
         </div>
       </div>
@@ -1593,67 +1593,80 @@ function pageAI(){
     </div>
   </section>`;
 }
-function aiGenerate(mode, input, context){
+// --- Real AI via Pollinations (free, no key) ---
+async function fetchPollinations(prompt){
+  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai`;
+  const ctrl = new AbortController();
+  const t = setTimeout(()=> ctrl.abort(), 15000);
+  try{
+    const r = await fetch(url, {signal: ctrl.signal, headers: {Accept: "text/plain"}});
+    clearTimeout(t);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const txt = await r.text();
+    if(!txt || txt.trim().length < 10) throw new Error("Empty response");
+    return txt.trim();
+  } finally { clearTimeout(t); }
+}
+
+function formatAIText(raw){
+  let html = esc(raw);
+  html = html.replace(/```([\s\S]*?)```/g, (m,code)=> `<pre style="background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;font-size:13px;white-space:pre-wrap">${esc(code.trim())}</pre>`);
+  html = html.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  html = html.replace(/^###\s*(.*)$/gm, '<h3 style="margin:14px 0 6px;font-size:15px">$1</h3>');
+  html = html.replace(/^##\s*(.*)$/gm, '<h3 style="margin:14px 0 6px;font-size:15px">$1</h3>');
+  html = html.replace(/^\s*[-•]\s+(.*)$/gm, '<div style="display:flex;gap:8px;margin:4px 0"><span style="color:var(--accent)">•</span><span>$1</span></div>');
+  html = html.replace(/^\s*\d+\.\s+(.*)$/gm, '<div style="display:flex;gap:8px;margin:4px 0"><span style="color:var(--accent)">•</span><span>$1</span></div>');
+  html = html.replace(/\n\n+/g, '</p><p style="margin:8px 0;font-size:13.5px;line-height:1.65">');
+  html = html.replace(/\n/g, '<br>');
+  return `<div style="font-size:13.5px;line-height:1.65"><p style="margin:8px 0">${html}</p></div>`;
+}
+
+function buildAIPrompt(mode, input, context){
+  const ch = getChapters(context.class, context.subject)[context.chapter];
+  const chapterName = ch ? ch.title : "Commerce topic";
+  const subjectName = SUBJECT_NAMES[context.subject] || context.subject;
   const cls = context.class;
-  const subject = context.subject;
-  const ch = getChapters(cls, subject)[context.chapter];
-  const chapterName = ch? ch.title : "this chapter";
-  const base = {
-    explain: `
-      <h3 style="margin-top:10px">Simple explanation — ${esc(chapterName)}</h3>
-      <p style="font-size:13.5px">Goodwill is the value of a firm's reputation that lets it earn more than normal profits. Think of it as the extra price a buyer will pay for a running business with customers, brand and trust.</p>
-      <h3>Why this happens</h3>
-      <p style="font-size:13.5px">Because future profits are expected to be higher than a new firm with same capital. Capitalisation method captures this by comparing capitalised value of average profit with actual capital employed.</p>
-      <h3>Step-by-step</h3>
-      <ol style="font-size:13.5px">
-        <li>Calculate average profit (adjust abnormal items).</li>
-        <li>Normal profit = Capital Employed × Normal Rate /100</li>
-        <li>Super profit = Average − Normal</li>
-        <li>Goodwill = Super profit × Years' purchase</li>
-      </ol>
-      <div style="padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;margin-top:10px"><b>Exam tip:</b> Show formula → substitution → answer. Mention method name.</div>
-      <p style="margin-top:10px"><b>Try this question:</b> Capital 5L, normal 10%, average profit 80k, purchase 3 years. What is goodwill? (Answer: 90k)</p>
-    `,
-    solve: `
-      <h3>Step-by-step solution</h3>
-      <p style="font-size:13.5px"><b>Given:</b> Profits for 5 years: 40k,50k,60k,35k,65k. Find goodwill at 2 years' purchase of average profit.</p>
-      <p><b>Step 1:</b> Average = (40+50+60+35+65)/5 = 250/5 = 50k</p>
-      <p><b>Step 2:</b> Goodwill = Average × Purchase = 50k ×2 = 1,00,000</p>
-      <p><b>Final Answer:</b> ₹1,00,000</p>
-      <p><b>Formula:</b> <code style="background:var(--card-2);padding:2px 6px;border-radius:6px;border:1px solid var(--line)">Goodwill = Average Profit × Years' purchase</code></p>
-      <p style="color:var(--danger)"><b>Common mistake:</b> Not adjusting abnormal losses before averaging.</p>
-    `,
-    "check-answer": `
-      <div style="display:grid;gap:8px;margin-top:10px">
-        <div style="padding:10px;border:1px solid var(--success-line);background:var(--success-soft);border-radius:10px"><b>What you did well ✓</b><p style="font-size:13px">You defined goodwill as reputation/excess earning capacity — correct keyword.</p></div>
-        <div style="padding:10px;border:1px solid #fde68a;background:var(--warning-soft);border-radius:10px"><b>What is missing ⚠</b><p style="font-size:13px">Add: intangible asset, valuable only when profitable, methods of valuation.</p></div>
-        <div style="padding:10px;border:1px solid #fecdd3;background:var(--danger-soft);border-radius:10px"><b>What is incorrect ❌</b><p style="font-size:13px">Nothing major, but avoid saying goodwill = total assets.</p></div>
-        <div style="padding:10px;border:1px solid var(--line);background:var(--card-2);border-radius:10px"><b>Suggested exam answer:</b><p style="font-size:13px">Goodwill is the value of the reputation of a firm in respect of profits expected in future over and above normal profits. It is an intangible asset, valued by Average Profit, Super Profit or Capitalisation methods.</p></div>
-      </div>
-    `,
-    hint: `<p style="font-size:13.5px">Hint: Start with <b>Average Profit → Normal Profit → Super Profit</b>. Normal profit uses capital employed. What is average profit here?</p>`,
-    simplify: `<p style="font-size:13.5px"><b>Goodwill = extra profit reputation.</b> Average = total/years. Super = Average − Normal. Goodwill = Super × purchase.</p>`,
-    examiner: `<p style="font-size:13.5px"><b>Examiner Mode (strict):</b> You must write: definition with keywords, formula, substitution, answer with ₹. No marks for only final answer. Show working notes.</p>`,
-    "teach-me": `<p style="font-size:13.5px"><b>Let's learn ${esc(chapterName)} together.</b> First, tell me: what do you think goodwill means? Then I'll explain with an example and quiz you.</p>`,
-    "quiz-me": `
-      <p style="font-size:13.5px"><b>Quick quiz — ${esc(chapterName)}</b></p>
-      <ol style="font-size:13.5px">
-        <li>Capital 4L, normal 10%, average profit 60k. What is normal profit? <details><summary>Show answer</summary>40k</summary></details></li>
-        <li>Goodwill at 2 years' purchase of average profit 50k? <details><summary>Show answer</summary>1,00,000</summary></details></li>
-        <li>Which ratio is used for goodwill adjustment on admission? <details><summary>Show answer</summary>Sacrificing Ratio</details></li>
-      </ol>
-    `,
-  };
-  const content = base[mode] || base.explain;
-  const qText = input? `<p style="color:var(--muted);font-size:12px;margin-bottom:8px"><b>Your question:</b> ${esc(input)}</p>` : "";
-  return `
-    <span class="badge badge-primary">Demo AI · ${esc(mode||"explain")} · ${esc(chapterName)} · Class ${cls}</span>
-    ${qText}
-    <div style="margin-top:10px;font-size:13.5px;line-height:1.6">
-      ${content}
-    </div>
-    <p style="margin-top:12px;color:var(--muted);font-size:11px">This is a rule-based demo response, not a live LLM. It adapts to your selected class/chapter context. Replace with a real backend when ready.</p>
-  `;
+  const topicPoints = ch ? ch.keyPoints.slice(0,2).join("; ") : "";
+  const modeInstr = {
+    explain: "Explain the concept simply, student-friendly, CBSE-oriented. Structure: Simple explanation, Why it happens, Step-by-step, Exam tip, Try this question.",
+    solve: "Solve step-by-step with Given, Formula, Substitution, Final Answer, and Common mistake. Show numerical working clearly.",
+    "teach-me": "Teach like a friendly teacher, interactive, ask a check question at the end.",
+    "quiz-me": "Create 3 quiz questions of increasing difficulty with answers hidden (use 'Answer:' line).",
+    "check-answer": "Check the student's answer: list What you did well (✓), What is missing (⚠), What is incorrect (❌), and Suggested exam answer. Be encouraging.",
+    hint: "Give a helpful hint, not full solution. Ask a guiding question.",
+    simplify: "Simplify for 30-second revision, bullet points, very concise.",
+    examiner: "Be a strict CBSE examiner: tell exact keywords needed, marks breakdown, what gets zero, how to present."
+  }[mode] || "Explain simply for CBSE Class 11-12 Commerce.";
+  if(mode === "check-answer" && input){
+    return `You are Commerce-Students AI — CBSE Commerce tutor for Class ${cls} ${subjectName}, Chapter: ${chapterName}. Key points: ${topicPoints}. Task: ${modeInstr} Student answer to check: """${input}""" Context chapter: ${chapterName}. Keep tone student-friendly, concise, exam-oriented. Use Indian English, ₹ for currency.`;
+  }
+  const userQ = input ? input : `Explain ${chapterName} for CBSE Class ${cls} ${subjectName}`;
+  return `You are Commerce-Students AI — expert CBSE Commerce tutor for Class ${cls} ${subjectName}, Chapter: ${chapterName}. Key points: ${topicPoints}. Task: ${modeInstr} User question: """${userQ}""" Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff.`;
+}
+
+async function aiGenerate(mode, input, context){
+  const ch = getChapters(context.class, context.subject)[context.chapter];
+  const chapterName = ch ? ch.title : "this chapter";
+  const cls = context.class;
+  const qText = input ? `<p style="color:var(--muted);font-size:12px;margin-bottom:8px"><b>Your question:</b> ${esc(input)}</p>` : "";
+  const header = `<span class="badge badge-primary">Live AI · ${esc(mode||"explain")} · ${esc(chapterName)} · Class ${cls}</span>${qText}`;
+  const prompt = buildAIPrompt(mode, input, context);
+  try{
+    const raw = await fetchPollinations(prompt);
+    const formatted = formatAIText(raw);
+    return `${header}<div style="margin-top:10px">${formatted}</div><p style="margin-top:10px;color:var(--muted);font-size:11px">Live response via <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key) · Model: openai · Context: ${esc(chapterName)} · Verify with textbook.</p>`;
+  }catch(err){
+    console.warn("Pollinations failed, fallback demo", err);
+    const fallbackBase = {
+      explain: `<p>Goodwill is the value of a firm's reputation that lets it earn more than normal profits. It's an intangible asset, valuable only when profitable. Calculate Average Profit → Normal Profit (Capital×Rate/100) → Super Profit (Average−Normal) → Goodwill (Super×Purchase). <b>Exam tip:</b> Show formula → substitution → answer.</p>`,
+      solve: `<p><b>Example:</b> Profits 40k,50k,60k,35k,65k → Average 50k → Goodwill at 2 years' purchase = 1,00,000. <b>Formula:</b> Goodwill = Average Profit × Years' purchase.</p>`,
+      "check-answer": `<p>Thanks for sharing! <b>✓</b> You used correct keyword. <b>⚠ Missing:</b> Mention intangible, methods (Average/Super/Capitalisation). <b>Suggested:</b> "Goodwill is the value of reputation expected over normal profits, valued by Average/Super/Capitalisation methods."</p>`,
+      hint: `<p>Hint: Start with <b>Average Profit → Normal Profit → Super Profit</b>. What is average here?</p>`,
+      simplify: `<p><b>Goodwill = extra earning reputation.</b> Avg = total/years. Super = Avg−Normal. Goodwill = Super×purchase.</p>`
+    };
+    const demo = fallbackBase[mode] || fallbackBase.explain;
+    return `${header}<div style="margin-top:10px;font-size:13.5px;line-height:1.6">${demo}</div><div style="margin-top:8px;padding:10px;border:1px dashed var(--warning);background:var(--warning-soft);border-radius:10px;font-size:12px"><b>Note:</b> Live AI was temporarily unavailable — showing offline fallback. Your question was: ${esc(input||mode)}. Try again in a moment for a fresh AI answer.</div>`;
+  }
 }
 
 // --- PROGRESS / DASHBOARD ---
@@ -2443,9 +2456,9 @@ function handleClick(e){
     const ctx = q? {class:q.class, subject:q.subject, chapter: getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter)} : aiContext;
     aiContext=ctx;
     location.hash=`#ai?class=${ctx.class}&subject=${ctx.subject}&chapter=${ctx.chapter}`;
-    setTimeout(()=>{
+    setTimeout(async ()=>{
       const out=$("#ai-output");
-      if(out) out.innerHTML=aiGenerate("explain", q? q.question : "", ctx);
+      if(out) out.innerHTML=await aiGenerate("explain", q? q.question : "", ctx);
     },100);
     return;
   }
@@ -2515,7 +2528,7 @@ function handleClick(e){
     const out=$("#ai-output");
     if(out){
       out.innerHTML=`<div class="skeleton" style="height:18px;width:60%"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:85%;margin-top:8px"></div>`;
-      setTimeout(()=>{ out.innerHTML=aiGenerate(mode, input, ctx); }, 350);
+      (async ()=>{ out.innerHTML=await aiGenerate(mode, input, ctx); })();
     }
     return;
   }
@@ -2531,19 +2544,18 @@ function handleClick(e){
     const out=$("#ai-output");
     if(out){
       out.innerHTML=`<div class="skeleton" style="height:16px;width:70%"></div><div class="skeleton" style="height:14px;width:95%;margin-top:8px"></div>`;
-      setTimeout(()=>{ out.innerHTML=aiGenerate("explain", input, ctx); }, 350);
+      (async ()=>{ out.innerHTML=await aiGenerate("explain", input, ctx); })();
     }
     return;
   }
   if(target.id==="explain-ai"){
     const q=practiceState.questions[practiceState.idx];
     const ctx={class:q.class, subject:q.subject, chapter: getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter)};
-    const out=$("#ai-output");
     // for practice, show toast with explanation via AI page
     location.hash=`#ai?class=${q.class}&subject=${q.subject}&chapter=${ctx.chapter}`;
-    setTimeout(()=>{
+    setTimeout(async ()=>{
       const el=$("#ai-output");
-      if(el) el.innerHTML=aiGenerate("explain", q.question, ctx);
+      if(el) el.innerHTML=await aiGenerate("explain", q.question, ctx);
       const inp=$("#ai-input");
       if(inp) inp.value=q.question;
     },200);
