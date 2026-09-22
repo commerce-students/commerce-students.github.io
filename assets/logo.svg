@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Commerce-Students">
+  <rect width="64" height="64" rx="18" fill="#0f2a44"/>
+  <g fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 22h20c4 0 7 3 7 7s-3 7-7 7H26l-8 9v-9c-3 0-5-2-5-5v-2c0-4 3-7 7-7Z"/>
+    <circle cx="26" cy="29" r="2" fill="white" stroke="none"/>
+    <circle cx="32.5" cy="29" r="2" fill="white" stroke="none"/>
+    <circle cx="39" cy="29" r="2" fill="white" stroke="none"/>
+  </g>
+  <path d="M44 14.5 46.2 19l4.8.7-3.5 3.4.8 4.8L44 25.6l-4.3 2.3.8-4.8L37 19.7l4.8-.7L44 14.5Z" fill="#f59e0b" stroke="white" stroke-width="1.2"/>
+</svg>

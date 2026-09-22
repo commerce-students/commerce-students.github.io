@@ -1,0 +1,17 @@
+{
+  "name": "Commerce-Students",
+  "short_name": "Commerce",
+  "description": "Your complete CBSE Commerce study companion — Classes 11 & 12",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfcfd",
+  "theme_color": "#0f2a44",
+  "icons": [
+    {
+      "src": "assets/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
