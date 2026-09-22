@@ -1595,17 +1595,45 @@ function pageAI(){
 }
 // --- Real AI via Pollinations (free, no key) ---
 async function fetchPollinations(prompt){
-  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai`;
   const ctrl = new AbortController();
-  const t = setTimeout(()=> ctrl.abort(), 15000);
+  const tid = setTimeout(()=> ctrl.abort(), 18000);
+  // Try POST to /openai (reliable for long prompts, no URL length limit)
   try{
-    const r = await fetch(url, {signal: ctrl.signal, headers: {Accept: "text/plain"}});
-    clearTimeout(t);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const txt = await r.text();
+    const r = await fetch("https://text.pollinations.ai/openai", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: "openai",
+        messages: [{role:"user", content: prompt}],
+        stream: false,
+        temperature: 0.7
+      })
+    });
+    if(r.ok){
+      const j = await r.json().catch(()=>null);
+      const content = j?.choices?.[0]?.message?.content || j?.choices?.[0]?.text || "";
+      if(content && content.trim().length > 10){
+        clearTimeout(tid);
+        return content.trim();
+      }
+    }
+  }catch(e){
+    console.warn("Pollinations POST failed, trying GET", e);
+  }
+  // Fallback GET (short prompt slice to avoid URI too long)
+  try{
+    const shortPrompt = prompt.slice(0, 1200);
+    const url = `https://text.pollinations.ai/${encodeURIComponent(shortPrompt)}?model=openai`;
+    const r2 = await fetch(url, {signal: ctrl.signal});
+    clearTimeout(tid);
+    if(!r2.ok) throw new Error(`HTTP ${r2.status}`);
+    const txt = await r2.text();
     if(!txt || txt.trim().length < 10) throw new Error("Empty response");
     return txt.trim();
-  } finally { clearTimeout(t); }
+  }finally{
+    clearTimeout(tid);
+  }
 }
 
 function formatAIText(raw){
@@ -1637,11 +1665,16 @@ function buildAIPrompt(mode, input, context){
     simplify: "Simplify for 30-second revision, bullet points, very concise.",
     examiner: "Be a strict CBSE examiner: tell exact keywords needed, marks breakdown, what gets zero, how to present."
   }[mode] || "Explain simply for CBSE Class 11-12 Commerce.";
+  // Use plain ASCII, no em dash, no triple quotes to keep GET URL safe
+  const safeChapter = chapterName.replace(/[^\x00-\x7F]/g, "");
+  const safeSubject = subjectName.replace(/[^\x00-\x7F]/g, "");
   if(mode === "check-answer" && input){
-    return `You are Commerce-Students AI — CBSE Commerce tutor for Class ${cls} ${subjectName}, Chapter: ${chapterName}. Key points: ${topicPoints}. Task: ${modeInstr} Student answer to check: """${input}""" Context chapter: ${chapterName}. Keep tone student-friendly, concise, exam-oriented. Use Indian English, ₹ for currency.`;
+    const safeInput = String(input).slice(0, 600).replace(/[^\x00-\x7F]/g, "");
+    return `You are Commerce-Students AI, CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${topicPoints}. Task: ${modeInstr} Student answer to check: "${safeInput}" Context chapter: ${safeChapter}. Keep tone student-friendly, concise, exam-oriented. Use Indian English, Rs for currency.`;
   }
-  const userQ = input ? input : `Explain ${chapterName} for CBSE Class ${cls} ${subjectName}`;
-  return `You are Commerce-Students AI — expert CBSE Commerce tutor for Class ${cls} ${subjectName}, Chapter: ${chapterName}. Key points: ${topicPoints}. Task: ${modeInstr} User question: """${userQ}""" Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff.`;
+  const rawQ = input ? String(input).slice(0, 600) : `Explain ${safeChapter} for CBSE Class ${cls} ${safeSubject}`;
+  const safeQ = rawQ.replace(/[^\x00-\x7F]/g, "");
+  return `You are Commerce-Students AI, expert CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${topicPoints}. Task: ${modeInstr} User question: "${safeQ}" Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff.`;
 }
 
 async function aiGenerate(mode, input, context){
