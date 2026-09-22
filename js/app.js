@@ -1520,22 +1520,30 @@ function pageAI(){
   const ch = getChapters(cls, subject)[chapterIdx];
   const contextLabel = ch? `${SUBJECT_NAMES[subject]} · ${ch.title} · Class ${cls}` : `${SUBJECT_NAMES[subject]} · Class ${cls}`;
   document.title="AI Study Assistant · Commerce-Students";
+  const provName = getAIProvider().name;
   return `
   <section class="shell page">
     ${breadcrumbs([{label:"Home",href:"#home"},{label:"AI Study Assistant"}])}
-    <span class="eyebrow">AI Study Assistant · Live — Pollinations free</span>
+    <span class="eyebrow">AI Study Assistant · Live — ${esc(provName)}</span>
     <h1 class="page-title">Your Commerce tutor — real AI.</h1>
-    <p class="page-intro">Context-aware help for the chapter you're studying. <b>Live AI</b> powered by <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key) + <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">Gemini</a> (free key, more reliable). Responses are real — not canned demos. If offline, we fall back to a chapter-specific explanation.</p>
+    <p class="page-intro">Context-aware help for the chapter you're studying. Flow: <b>Question → Real API → Real Response → Display</b> (no silent demos). <b>Live AI</b> via <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key, rate-limited) + <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">Gemini</a> (free key, most reliable — 30 sec setup). <span style="background:var(--warning-soft);padding:2px 6px;border-radius:6px;border:1px solid #fde68a">Real responses are labeled <b>✓ Real AI response</b> — demo is <b>never</b> shown as if it were AI.</span></p>
+
     <div class="card" style="margin-top:14px;background:var(--card-2);border:1px dashed var(--line)">
-      <strong style="font-size:13px">Live AI key (optional but recommended)</strong>
-      <p style="color:var(--muted);font-size:12px;margin:4px 0 8px">For <b>reliable live AI</b> add a free Gemini key (AIza...) from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> — free, no credit card, 1-min. Or a Pollinations key (pk_/sk_) from <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">enter.pollinations.ai</a>. Stored locally only, never sent to our server.</p>
+      <strong style="font-size:13px">Live AI key (recommended for reliability)</strong>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 8px">For <b>reliable live AI</b> add a free Gemini key (AIza...) from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> — free, no credit card, 1-min. Or a Pollinations key (pk_/sk_) from <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">enter.pollinations.ai</a>. Stored locally only in <code>localStorage</code> on YOUR device — not sent to our server, not committed to GitHub.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <input id="ai-key-input" type="password" placeholder="Paste Gemini (AIza...) or Pollinations (pk_/sk_...) key" value="${esc(Store.getApiKey? Store.getApiKey() : "")}" style="flex:1;min-width:240px;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--card)">
         <button class="btn btn-primary" id="save-ai-key">Save key</button>
         <button class="btn" id="clear-ai-key">Clear</button>
         <button class="btn" id="test-ai-key">Test live AI</button>
       </div>
-      <div id="ai-key-status" style="margin-top:8px;font-size:12px;color:var(--muted)">${(Store.getApiKey && Store.getApiKey()) ? `Saved: ${esc(Store.getApiKey().slice(0,6))}**** · <span style="color:var(--success)">Live AI will use your key (most reliable)</span>` : `No key saved · Using free Pollinations (rate-limited, may fallback). <b>Tip:</b> Add Gemini key for instant live responses.`}</div>
+      <div id="ai-key-status" style="margin-top:8px;font-size:12px;color:var(--muted)">${(Store.getApiKey && Store.getApiKey()) ? `Saved: ${esc(Store.getApiKey().slice(0,6))}**** · <span style="color:var(--success)">Live AI will use your key (most reliable)</span> · Provider: ${esc(provName)}` : `No key saved · Using free Pollinations (rate-limited) · Provider: ${esc(provName)} · <b>Tip:</b> Add Gemini key for instant live responses.`}</div>
+      <details style="margin-top:10px;padding:10px;background:var(--warning-soft);border:1px solid #fde68a;border-radius:10px;font-size:12px">
+        <summary style="cursor:pointer;font-weight:700">⚠️ GitHub Pages security note — why we need a backend for true security</summary>
+        <p style="margin-top:8px">GitHub Pages is <b>static hosting</b> — every API call happens <b>in your browser</b>. That means a Gemini key saved here is sent <b>directly from your browser to Google</b> (inspectable in DevTools → Network). It's <b>not</b> hidden from someone who can open DevTools on your device, and if you share a device they could extract it. For a personal device this is low risk (Google free-tier keys have generous free quota and you can rotate/regenerate anytime at aistudio.google.com), but for a <b>production site with many users</b> a backend proxy is the correct design: browser → your server (keeps the secret key server-side) → Gemini, so the key never leaves the server.</p>
+        <p style="margin-top:6px"><b>We do NOT fake a key or pretend demo is real.</b> See <code>server/README.md</code> + <code>server/index.js</code> for a ready-to-deploy Node/Express proxy (5 min) that moves the key server-side. For now, localStorage + direct calls = working real AI with explicit labeling.</p>
+        <p style="margin-top:6px"><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">Get / rotate your free Gemini key →</a> &nbsp;|&nbsp; <a href="#" onclick="window.CS.showAIDebug&&window.CS.showAIDebug();return false" style="text-decoration:underline">Show AI debug</a></p>
+      </details>
     </div>
 
     <div class="card" style="margin-top:14px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:var(--accent-soft)">
@@ -1594,6 +1602,22 @@ function pageAI(){
     </div>
 
     <div class="card" style="margin-top:16px">
+      <h3>How it works — Real flow (no pretending)</h3>
+      <ol style="color:var(--muted);font-size:13px;margin-top:6px;line-height:1.6">
+        <li><b>QUESTION</b> — current Class/Subject/Chapter/Question/Options/Correct/Your answer are packaged (see Console → <code>[AI DEBUG]</code>).</li>
+        <li><b>REAL API</b> — browser sends prompt to Gemini or Pollinations (<code>fetch</code> → check <code>Response status</code> &amp; <code>API error</code> in Console).</li>
+        <li><b>REAL RESPONSE</b> — on HTTP 2xx + non-empty <code>choices[0].message.content</code> / <code>candidates[0].content.parts[0].text</code> we show <span style="background:var(--success-soft);padding:1px 6px;border-radius:6px;border:1px solid var(--success-line)">✓ Real AI response · Provider: ${esc(provName)}</span></li>
+        <li><b>FAILED?</b> — we show <span style="background:#fef2f2;padding:1px 6px;border-radius:6px;border:1px solid #fecaca">AI request failed · Provider + HTTP status + error</span> with <b>Retry</b> and <b>Show offline explanation (explicit fallback)</b> — demo is <b>never</b> auto-shown as real.</li>
+        <li>Debug: open F12 → Console (filters: <code>[AI DEBUG]</code>), or run <code>CS.showAIDebug()</code>, or <code>await CS.testAIWithQuestions()</code> for 3-question proof.</li>
+      </ol>
+      <div class="row" style="margin-top:10px">
+        <button class="btn btn-sm" onclick="window.CS.showAIDebug&&window.CS.showAIDebug()">Show AI debug</button>
+        <button class="btn btn-sm" onclick="window.CS.testAIWithQuestions&&window.CS.testAIWithQuestions()">Test with 3 questions (console)</button>
+        <a class="btn btn-sm" href="#profile">Profile & key settings</a>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
       <h3>How to get the best from AI</h3>
       <ul style="color:var(--muted);font-size:13px;margin-top:6px">
         <li>Be specific: “Explain BRS with numerical” beats “teach me accountancy”.</li>
@@ -1604,33 +1628,59 @@ function pageAI(){
     </div>
   </section>`;
 }
-// --- Real AI via Pollinations (free, no key) ---
+// --- AI Provider & Debug ---
+function getAIProvider(){
+  const k = (Store.getApiKey && Store.getApiKey() || "").trim();
+  if(k.startsWith("AIza")) return {name:"Gemini", keyType:"gemini"};
+  if(k.startsWith("sk_") || k.startsWith("pk_")) return {name:"Pollinations (key)", keyType:"pollinations-key"};
+  return {name:"Pollinations (free)", keyType:"pollinations-free"};
+}
+function aiDebugLog(...args){
+  // Always log for now; gate behind localStorage debug flag if needed
+  console.log("[AI DEBUG]", ...args);
+}
+
+// --- Real AI via Gemini / Pollinations ---
 async function fetchGemini(prompt, apiKey){
+  const provider = "Gemini";
+  aiDebugLog(`Provider: ${provider}`, `Prompt chars: ${prompt.length}`, `Key: ${apiKey.slice(0,4)}****`);
+  aiDebugLog("REQUEST SENT: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
   const r = await fetch(url, {
     method: "POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
       contents: [{parts:[{text: prompt}]}],
-      generationConfig: {temperature: 0.7, maxOutputTokens: 900}
+      generationConfig: {temperature: 0.7, maxOutputTokens: 950}
     })
   });
+  aiDebugLog(`RESPONSE STATUS: ${r.status} ${r.statusText}`, `Provider: ${provider}`);
   if(!r.ok){
-    const err = await r.text().catch(()=> "");
-    throw new Error(`Gemini HTTP ${r.status}: ${err.slice(0,200)}`);
+    const errText = await r.text().catch(()=> "");
+    aiDebugLog(`API ERROR: ${errText.slice(0,600)}`, `Provider: ${provider}`);
+    // Provide helpful message for common errors
+    let msg = `Gemini HTTP ${r.status}: ${errText.slice(0,300)}`;
+    if(r.status===400) msg += " — Check API key and prompt. Get a free key at https://aistudio.google.com/app/apikey";
+    if(r.status===403) msg += " — API key invalid or not enabled for Gemini. Generate a new key at https://aistudio.google.com/app/apikey";
+    if(r.status===429) msg += " — Rate limited. Wait a minute or use Pollinations free tier.";
+    throw new Error(msg);
   }
-  const j = await r.json();
+  const j = await r.json().catch(e=>{ aiDebugLog("JSON parse failed", e); throw new Error("Gemini returned invalid JSON"); });
   const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  if(!text || text.trim().length < 10) throw new Error("Empty Gemini response");
+  aiDebugLog(`PARSED: ${text.length} chars`, `Provider: ${provider}`, `Preview: ${text.slice(0,120)}...`);
+  if(!text || text.trim().length < 10) throw new Error("Empty Gemini response (no candidates)");
   return text.trim();
 }
 
 async function fetchPollinationsWithKey(prompt, apiKey, ctrl){
+  const provider = "Pollinations (key)";
+  aiDebugLog(`Provider: ${provider}`, `Key: ${apiKey.slice(0,3)}****`, `Prompt chars: ${prompt.length}`);
+  aiDebugLog("REQUEST SENT: POST https://gen.pollinations.ai/v1/chat/completions");
   const url = "https://gen.pollinations.ai/v1/chat/completions";
   const r = await fetch(url, {
     method: "POST",
     headers: {"Content-Type":"application/json", "Authorization": `Bearer ${apiKey}`},
-    signal: ctrl.signal,
+    signal: ctrl?.signal,
     body: JSON.stringify({
       model: "openai",
       messages: [{role:"user", content: prompt}],
@@ -1638,32 +1688,47 @@ async function fetchPollinationsWithKey(prompt, apiKey, ctrl){
       temperature: 0.7
     })
   });
-  if(!r.ok) throw new Error(`Pollinations key HTTP ${r.status}`);
-  const j = await r.json();
+  aiDebugLog(`RESPONSE STATUS: ${r.status}`, `Provider: ${provider}`);
+  if(!r.ok){
+    const errText = await r.text().catch(()=> "");
+    aiDebugLog(`API ERROR: ${errText.slice(0,600)}`);
+    throw new Error(`Pollinations (key) HTTP ${r.status}: ${errText.slice(0,300)}`);
+  }
+  const j = await r.json().catch(()=>{ throw new Error("Pollinations key returned invalid JSON"); });
   const content = j?.choices?.[0]?.message?.content || "";
-  if(!content || content.trim().length < 10) throw new Error("Empty Pollinations key response");
+  aiDebugLog(`PARSED: ${content.length} chars`, `Provider: ${provider}`);
+  if(!content || content.trim().length < 10) throw new Error("Empty Pollinations (key) response");
   return content.trim();
 }
 
 async function fetchPollinations(prompt){
   const apiKey = (Store.getApiKey && Store.getApiKey() || "").trim();
+  const providerInfo = getAIProvider();
+  aiDebugLog("=== AI REQUEST START ===", `Provider selected: ${providerInfo.name}`, `HasKey: ${!!apiKey}`, `Prompt preview: ${prompt.slice(0,140)}...`);
   const ctrl = new AbortController();
-  const tid = setTimeout(()=> ctrl.abort(), 18000);
+  const tid = setTimeout(()=> { ctrl.abort(); aiDebugLog("TIMEOUT 18s — aborting"); }, 18000);
   try{
     if(apiKey && apiKey.startsWith("AIza")){
+      aiDebugLog("Trying Gemini (user key)...");
       const txt = await fetchGemini(prompt, apiKey);
       clearTimeout(tid);
+      aiDebugLog("=== AI REQUEST SUCCESS (Gemini) ===", `Chars: ${txt.length}`);
       return txt;
     }
     if(apiKey && (apiKey.startsWith("sk_") || apiKey.startsWith("pk_"))){
+      aiDebugLog("Trying Pollinations with user key...");
       try{
         const txt = await fetchPollinationsWithKey(prompt, apiKey, ctrl);
         clearTimeout(tid);
+        aiDebugLog("=== AI REQUEST SUCCESS (Pollinations key) ===");
         return txt;
       }catch(e){
-        console.warn("Pollinations with key failed, falling back to free", e);
+        aiDebugLog("Pollinations with key FAILED, falling back to free", e.message);
+        // fall through to free
       }
     }
+    // Free Pollinations POST
+    aiDebugLog("Trying Pollinations free POST https://text.pollinations.ai/openai ...");
     try{
       const r = await fetch("https://text.pollinations.ai/openai", {
         method: "POST",
@@ -1676,28 +1741,45 @@ async function fetchPollinations(prompt){
           temperature: 0.7
         })
       });
+      aiDebugLog(`Free POST status: ${r.status}`);
       if(r.ok){
         const j = await r.json().catch(()=>null);
         const content = j?.choices?.[0]?.message?.content || j?.choices?.[0]?.text || "";
+        aiDebugLog(`Free POST parsed: ${content.length} chars`);
         if(content && content.trim().length > 10){
           clearTimeout(tid);
+          aiDebugLog("=== AI REQUEST SUCCESS (Pollinations free POST) ===");
           return content.trim();
         }
       }
-      console.warn("Pollinations free POST empty, trying GET");
+      const errText = await r.text().catch(()=> "");
+      aiDebugLog(`Free POST empty/error: ${r.status} ${errText.slice(0,300)}`);
     }catch(e){
-      console.warn("Pollinations POST failed, trying GET", e);
+      if(e.name==="AbortError") { aiDebugLog("Free POST aborted (timeout)"); throw new Error("AI request timed out after 18s — check network or try again. Free Pollinations may be slow."); }
+      aiDebugLog("Free POST failed, trying GET", e.message);
     }
+    // Fallback GET
+    aiDebugLog("Trying Pollinations free GET ...");
     const shortPrompt = prompt.slice(0, 1100);
     const url = `https://text.pollinations.ai/${encodeURIComponent(shortPrompt)}?model=openai`;
+    aiDebugLog(`GET URL length: ${url.length}`, `URL preview: ${url.slice(0,140)}...`);
     const r2 = await fetch(url, {signal: ctrl.signal});
-    clearTimeout(tid);
-    if(!r2.ok) throw new Error(`HTTP ${r2.status}`);
+    aiDebugLog(`GET status: ${r2.status}`);
+    if(!r2.ok){
+      const errText = await r2.text().catch(()=> "");
+      aiDebugLog(`GET error body: ${errText.slice(0,400)}`);
+      throw new Error(`Pollinations GET HTTP ${r2.status}: ${errText.slice(0,300)} — Free tier may be rate-limited. Add a free Gemini key at aistudio.google.com/app/apikey for reliability.`);
+    }
     const txt = await r2.text();
-    if(!txt || txt.trim().length < 10) throw new Error("Empty response");
+    aiDebugLog(`GET parsed: ${txt.length} chars`);
+    if(!txt || txt.trim().length < 10) throw new Error("Empty response from Pollinations GET");
+    clearTimeout(tid);
+    aiDebugLog("=== AI REQUEST SUCCESS (Pollinations free GET) ===");
     return txt.trim();
   }catch(e){
     clearTimeout(tid);
+    aiDebugLog("=== AI REQUEST FAILED ===", e.message, e.name);
+    // Do NOT swallow — rethrow with provider context
     throw e;
   }
 }
@@ -1726,21 +1808,51 @@ function buildAIPrompt(mode, input, context){
     solve: "Solve step-by-step with Given, Formula, Substitution, Final Answer, and Common mistake. Show numerical working clearly.",
     "teach-me": "Teach like a friendly teacher, interactive, ask a check question at the end.",
     "quiz-me": "Create 3 quiz questions of increasing difficulty with answers hidden (use 'Answer:' line).",
-    "check-answer": "Check the student's answer: list What you did well (✓), What is missing (⚠), What is incorrect (❌), and Suggested exam answer. Be encouraging.",
+    "check-answer": "Check the student's answer: list What you did well (\u2713), What is missing (\u26A0), What is incorrect (\u274C), and Suggested exam answer. Be encouraging.",
     hint: "Give a helpful hint, not full solution. Ask a guiding question.",
     simplify: "Simplify for 30-second revision, bullet points, very concise.",
     examiner: "Be a strict CBSE examiner: tell exact keywords needed, marks breakdown, what gets zero, how to present."
   }[mode] || "Explain simply for CBSE Class 11-12 Commerce.";
-  // Use plain ASCII, no em dash, no triple quotes to keep GET URL safe
   const safeChapter = chapterName.replace(/[^\x00-\x7F]/g, "");
   const safeSubject = subjectName.replace(/[^\x00-\x7F]/g, "");
-  if(mode === "check-answer" && input){
+  const safeTopicPoints = topicPoints.replace(/[^\x00-\x7F]/g, "");
+  // input may be string OR a rich question object {question,options,correct,selectedAnswer, topic, chapter}
+  let payload = "";
+  let questionText = "";
+  if(input && typeof input === 'object' && input.question){
+    // Full question object - REQUIREMENT: use current question data
+    const q = input;
+    const opts = Array.isArray(q.options) && q.options.length ? q.options.map((o,i)=> String.fromCharCode(65+i)+". "+String(o)).join(" | ") : "No options (short answer)";
+    const correctLabel = (q.correct!=null && q.options && q.options[q.correct]) ? String.fromCharCode(65+q.correct)+". "+q.options[q.correct] : (q.correct!=null? String(q.correct) : "N/A");
+    const selectedLabel = (q.selectedAnswer!=null && q.options && q.options[q.selectedAnswer]) ? String.fromCharCode(65+q.selectedAnswer)+". "+q.options[q.selectedAnswer] : (q.selectedAnswer!=null? String(q.selectedAnswer) : "Not answered yet");
+    const topicInfo = q.topic ? "Topic: "+q.topic : "";
+    const marksInfo = q.marks ? q.marks+" mark" : "";
+    const safeQText = String(q.question).slice(0, 500).replace(/[^\x00-\x7F]/g, "");
+    const safeOpts = String(opts).slice(0, 600).replace(/[^\x00-\x7F]/g, "");
+    questionText = safeQText;
+    payload = `CURRENT QUESTION (must answer this exact question, not generic):\nClass: ${cls} | Subject: ${safeSubject} | Chapter: ${safeChapter} | ${topicInfo} ${marksInfo}\nQuestion: "${safeQText}"\nOptions: ${safeOpts}\nCorrect Answer: ${correctLabel.replace(/[^\x00-\x7F]/g,"")}\nStudent's Selected Answer: ${selectedLabel.replace(/[^\x00-\x7F]/g,"")}\nInstruction: Base your explanation ONLY on this question. If student was wrong, explain why their choice is wrong and why correct is right. If right, praise and reinforce.`;
+  } else if(mode === "check-answer" && input){
     const safeInput = String(input).slice(0, 600).replace(/[^\x00-\x7F]/g, "");
-    return `You are Commerce-Students AI, CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${topicPoints}. Task: ${modeInstr} Student answer to check: "${safeInput}" Context chapter: ${safeChapter}. Keep tone student-friendly, concise, exam-oriented. Use Indian English, Rs for currency.`;
+    return `You are Commerce-Students AI, CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${safeTopicPoints}. Task: ${modeInstr} Student answer to check: "${safeInput}" Context chapter: ${safeChapter}. Keep tone student-friendly, concise, exam-oriented. Use Indian English, Rs for currency.`;
+  } else {
+    const rawQ = input ? String(input).slice(0, 600) : `Explain ${safeChapter} for CBSE Class ${cls} ${safeSubject}`;
+    const safeQ = rawQ.replace(/[^\x00-\x7F]/g, "");
+    questionText = safeQ;
+    payload = `User question: "${safeQ}"`;
   }
-  const rawQ = input ? String(input).slice(0, 600) : `Explain ${safeChapter} for CBSE Class ${cls} ${safeSubject}`;
-  const safeQ = rawQ.replace(/[^\x00-\x7F]/g, "");
-  return `You are Commerce-Students AI, expert CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${topicPoints}. Task: ${modeInstr} User question: "${safeQ}" Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff.`;
+  return `You are Commerce-Students AI, expert CBSE Commerce tutor for Class ${cls} ${safeSubject}, Chapter: ${safeChapter}. Key points: ${safeTopicPoints}. Task: ${modeInstr} ${payload} Stay strictly to CBSE 2026-27 syllabus, student-friendly, clear headings, no extra fluff. Use Indian English.`;
+}
+
+// Enhanced helper: build prompt directly from a QUESTION object (used by Explain buttons)
+function buildAIPromptForQuestion(mode, qObj, context){
+  // qObj is {question, options, correct, selectedAnswer, topic, chapter, class, subject, marks}
+  // merge context from qObj if available
+  const ctx = {
+    class: qObj.class || context.class,
+    subject: qObj.subject || context.subject,
+    chapter: (typeof qObj.chapterIndex === 'number') ? qObj.chapterIndex : context.chapter
+  };
+  return buildAIPrompt(mode, qObj, ctx);
 }
 
 function apiKeyMsg(){
@@ -1749,38 +1861,126 @@ function apiKeyMsg(){
   return `No API key saved · <a href="#profile" style="text-decoration:underline">Add free Gemini key in Profile</a> ·`;
 }
 
-async function aiGenerate(mode, input, context){
+// Utility: build offline fallback (ONLY shown when user explicitly requests it)
+function buildOfflineFallback(mode, input, context){
   const ch = getChapters(context.class, context.subject)[context.chapter];
   const chapterName = ch ? ch.title : "this chapter";
   const subjectName = SUBJECT_NAMES[context.subject] || context.subject;
   const cls = context.class;
-  const qText = input ? `<p style="color:var(--muted);font-size:12px;margin-bottom:8px"><b>Your question:</b> ${esc(input)}</p>` : "";
-  const header = `<span class="badge badge-primary">Live AI · ${esc(mode||"explain")} · ${esc(chapterName)} · Class ${cls}</span>${qText}`;
+  const chPoints = (ch && ch.keyPoints ? ch.keyPoints.slice(0,2).join(" · ") : "See textbook");
+  const topicHint = ch ? `Key points: ${esc(chPoints)}` : "";
+  let displayInput = "";
+  if(input && typeof input === 'object' && input.question){
+    const q = input;
+    const opts = q.options ? q.options.map((o,i)=> String.fromCharCode(65+i)+". "+String(o)).join(" | ") : "";
+    displayInput = `<div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;font-size:12px"><b>Your question:</b> ${esc(q.question)}<br><small>${esc(opts)}<br>Correct: ${q.correct!=null && q.options ? esc(String.fromCharCode(65+q.correct)+". "+q.options[q.correct]) : "N/A"} | Yours: ${q.selectedAnswer!=null && q.options ? esc(String.fromCharCode(65+q.selectedAnswer)+". "+q.options[q.selectedAnswer]) : "Not answered"}</small></div>`;
+  } else if(input){
+    displayInput = `<p style="margin-top:10px;color:var(--muted);font-size:12px"><b>Your question:</b> ${esc(String(input).slice(0,300))}</p>`;
+  }
+  const dynamicExplain = `<p><b>${esc(chapterName)}</b> — ${esc(subjectName)} (Class ${cls})</p><p style="font-size:13.5px">${topicHint}</p><p style="font-size:13.5px">This is a <b>context-aware offline explanation</b> for <b>${esc(chapterName)}</b>. Live AI is temporarily unavailable, so here's a structured revision:</p><ul style="font-size:13.5px;margin:8px 0 0 18px"><li><b>Definition:</b> ${esc((ch && ch.keyPoints && ch.keyPoints[0]) || "Refer to NCERT definition for "+chapterName)}</li><li><b>Why it matters:</b> Frequently asked in CBSE 2026-27 — show keywords, formula and example.</li><li><b>How to answer:</b> Keyword → explanation → formula/example → exam tip.</li></ul><div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px"><b>Exam tip:</b> Write formula → substitution → answer with unit. Mention chapter name <b>${esc(chapterName)}</b> explicitly.</div>${displayInput}`;
+  const dynamicSolve = `<p><b>Solving for ${esc(chapterName)}</b> — ${esc(subjectName)}</p><p style="font-size:13.5px">Steps: <b>Given → Formula → Substitution → Answer</b>. ${topicHint}</p><p style="font-size:13.5px"><b>Example pattern:</b> For numericals in ${esc(chapterName)}, always adjust for abnormal items first, then apply the standard formula from your formula bank.</p>${displayInput}`;
+  const fallbackBase = {
+    explain: dynamicExplain,
+    solve: dynamicSolve,
+    "check-answer": `<p>Thanks for sharing! <b>\u2713</b> You attempted <b>${esc(chapterName)}</b>. <b>\u26A0 Missing:</b> Add keywords from: ${esc(chPoints)}. <br><b>Suggested structure:</b> Definition (keyword) \u2192 2 points \u2192 example. ${displayInput}</p>`,
+    hint: `<p>Hint for <b>${esc(chapterName)}</b>: Start with the definition, then ask: <i>What is the formula / key term here?</i> ${topicHint}</p>${displayInput}`,
+    simplify: `<p><b>${esc(chapterName)} — 30-sec:</b> ${esc(chPoints)} — remember formula → example.</p>`,
+    "quiz-me": `<p><b>Quick quiz — ${esc(chapterName)}</b> (offline)</p><ol style="font-size:13.5px"><li>Define the main term of ${esc(chapterName)} in one sentence.</li><li>State one formula / feature from ${esc(chapterName)}.</li><li>Give one common mistake in ${esc(chapterName)}.</li></ol><p style="color:var(--muted);font-size:12px">Live quiz available when AI is online — these are offline placeholders.</p>`,
+    "teach-me": `<p><b>Let's learn ${esc(chapterName)} together.</b> Offline mode: Tell me what you think <b>${esc(chapterName)}</b> means, then I'll guide you (live teacher mode needs AI online).</p>`,
+    examiner: `<p><b>Examiner Mode — ${esc(chapterName)} (offline)</b>: Must write keywords from ${esc(chPoints)}, formula, substitution, answer. No marks for only final answer.</p>`
+  };
+  return fallbackBase[mode] || fallbackBase.explain;
+}
+
+// TRUE AI — never silently falls back. Returns {ok:true, provider, raw, html} or throws enriched error {provider,status,message}
+async function aiGenerate(mode, input, context){
+  const providerInfo = getAIProvider();
+  const ch = getChapters(context.class, context.subject)[context.chapter];
+  const chapterName = ch ? ch.title : "this chapter";
+  const subjectName = SUBJECT_NAMES[context.subject] || context.subject;
+  const cls = context.class;
+  // Build header showing current question data (not stale)
+  let qHeader = "";
+  if(input && typeof input === 'object' && input.question){
+    const q = input;
+    const opts = q.options ? q.options.map((o,i)=> String.fromCharCode(65+i)+". "+String(o)).join(" | ") : "";
+    const selectedStr = q.selectedAnswer!=null && q.options ? String.fromCharCode(65+q.selectedAnswer)+". "+q.options[q.selectedAnswer] : (q.selectedAnswer!=null? String(q.selectedAnswer) : "Not answered");
+    const correctStr = q.correct!=null && q.options ? String.fromCharCode(65+q.correct)+". "+q.options[q.correct] : "N/A";
+    qHeader = `<div style="margin:8px 0;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;font-size:12px"><b>Current question:</b> ${esc(q.question)}<br><small>${esc(opts)}<br><b>Correct:</b> ${esc(correctStr)} &nbsp;|&nbsp; <b>Yours:</b> ${esc(selectedStr)} &nbsp;|&nbsp; ${esc(subjectName)} · ${esc(chapterName)} · Class ${cls} · ${esc(q.topic||"")}</small></div>`;
+  } else if(input){
+    qHeader = `<p style="color:var(--muted);font-size:12px;margin:8px 0"><b>Your question:</b> ${esc(String(input).slice(0,400))}</p>`;
+  }
+  const header = `<span class="badge badge-primary">Live AI · ${esc(mode||"explain")} · ${esc(chapterName)} · Class ${cls} · ${esc(providerInfo.name)}</span>${qHeader}`;
   const prompt = buildAIPrompt(mode, input, context);
+  // DEBUG LOGGING — REQUIREMENT: provider, request sent, HTTP status, error, parse
+  aiDebugLog("aiGenerate() called", {mode, provider: providerInfo.name, class:cls, subject:subjectName, chapter:chapterName, inputType: typeof input, promptLength: prompt.length});
+  // Store for window.CS debug
+  window.CS = window.CS || {};
+  window.CS._lastAIRequest = {mode, input, context, provider: providerInfo.name, prompt, ts: Date.now()};
   try{
     const raw = await fetchPollinations(prompt);
     const formatted = formatAIText(raw);
-    return `${header}<div style="margin-top:10px">${formatted}</div><p style="margin-top:10px;color:var(--muted);font-size:11px">Live response via <a href="https://pollinations.ai" target="_blank" rel="noreferrer" style="text-decoration:underline">Pollinations</a> (free, no key) · Model: openai · Context: ${esc(chapterName)} · Verify with textbook.</p>`;
+    window.CS._lastAIResponse = {raw, provider: providerInfo.name, ts: Date.now(), prompt};
+    aiDebugLog("aiGenerate SUCCESS", {provider: providerInfo.name, rawLength: raw.length});
+    const html = `${header}<div style="margin-top:10px">${formatted}</div><p style="margin-top:10px;color:var(--muted);font-size:11px">✓ <b>Real AI response</b> via ${esc(providerInfo.name)} · Model: openai/gemini-1.5-flash · Context: ${esc(chapterName)} · Verify with textbook. <a href="#" onclick="window.CS.showAIDebug&&window.CS.showAIDebug();return false" style="text-decoration:underline">Show debug</a></p>`;
+    return html;
   }catch(err){
-    console.warn("Pollinations failed, fallback demo", err);
-    const chPoints = (ch && ch.keyPoints ? ch.keyPoints.slice(0,2).join(" · ") : "See textbook");
-    const topicHint = ch ? `Key points: ${esc(chPoints)}` : "";
-    const dynamicExplain = `<p><b>${esc(chapterName)}</b> — ${esc(subjectName)} (Class ${cls})</p><p style="font-size:13.5px">${topicHint}</p><p style="font-size:13.5px">This is a <b>context-aware offline explanation</b> for <b>${esc(chapterName)}</b>. Live AI is temporarily unavailable, so here's a structured revision:</p><ul style="font-size:13.5px;margin:8px 0 0 18px"><li><b>Definition:</b> ${esc((ch && ch.keyPoints && ch.keyPoints[0]) || "Refer to NCERT definition for "+chapterName)}</li><li><b>Why it matters:</b> Frequently asked in CBSE 2026-27 — show keywords, formula and example.</li><li><b>How to answer:</b> Keyword → explanation → formula/example → exam tip.</li></ul><div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px solid var(--line);border-radius:10px"><b>Exam tip:</b> Write formula → substitution → answer with unit. Mention chapter name <b>${esc(chapterName)}</b> explicitly.</div>${input? `<p style="margin-top:10px;color:var(--muted);font-size:12px"><b>Your question:</b> ${esc(input)}</p>`: ""}`;
-    const dynamicSolve = `<p><b>Solving for ${esc(chapterName)}</b> — ${esc(subjectName)}</p><p style="font-size:13.5px">Steps: <b>Given → Formula → Substitution → Answer</b>. ${topicHint}</p><p style="font-size:13.5px"><b>Example pattern:</b> For numericals in ${esc(chapterName)}, always adjust for abnormal items first, then apply the standard formula from your formula bank.</p>`;
-    const fallbackBase = {
-      explain: dynamicExplain,
-      solve: dynamicSolve,
-      "check-answer": `<p>Thanks for sharing! <b>✓</b> You attempted <b>${esc(chapterName)}</b>. <b>⚠ Missing:</b> Add keywords from: ${esc(chPoints)}. <br><b>Suggested structure:</b> Definition (keyword) → 2 points → example. <b>Your answer:</b> "${esc(input||"")}"</p>`,
-      hint: `<p>Hint for <b>${esc(chapterName)}</b>: Start with the definition, then ask: <i>What is the formula / key term here?</i> ${topicHint}</p>`,
-      simplify: `<p><b>${esc(chapterName)} — 30-sec:</b> ${esc(chPoints)} — remember formula → example.</p>`,
-      "quiz-me": `<p><b>Quick quiz — ${esc(chapterName)}</b> (offline)</p><ol style="font-size:13.5px"><li>Define the main term of ${esc(chapterName)} in one sentence.</li><li>State one formula / feature from ${esc(chapterName)}.</li><li>Give one common mistake in ${esc(chapterName)}.</li></ol><p style="color:var(--muted);font-size:12px">Live quiz available when AI is online — these are offline placeholders.</p>`,
-      "teach-me": `<p><b>Let's learn ${esc(chapterName)} together.</b> Offline mode: Tell me what you think <b>${esc(chapterName)}</b> means, then I'll guide you (live teacher mode needs AI online).</p>`,
-      examiner: `<p><b>Examiner Mode — ${esc(chapterName)} (offline)</b>: Must write keywords from ${esc(chPoints)}, formula, substitution, answer. No marks for only final answer.</p>`
-    };
-    const demo = fallbackBase[mode] || fallbackBase.explain;
-    return `${header}<div style="margin-top:10px;font-size:13.5px;line-height:1.6">${demo}</div><div style="margin-top:8px;padding:10px;border:1px dashed var(--warning);background:var(--warning-soft);border-radius:10px;font-size:12px"><b>Note:</b> Live AI was temporarily unavailable — showing offline fallback for <b>${esc(chapterName)}</b>. ${apiKeyMsg()} Your question was: ${esc(input||mode)}. Try again in a moment or add a Gemini key in Profile for instant live AI.</div>`;
+    // DO NOT silently fallback — propagate real error
+    window.CS._lastAIError = {message: err.message, name: err.name, provider: providerInfo.name, ts: Date.now()};
+    aiDebugLog("aiGenerate FAILED", {provider: providerInfo.name, error: err.message, name: err.name});
+    // Build FAILED UI (no auto demo)
+    const errorName = err.name || "Error";
+    const errorMsg = esc(err.message || String(err));
+    const providerLabel = esc(providerInfo.name);
+    // Special hint for GitHub Pages CORS / key exposure
+    const ghHint = providerInfo.keyType==='gemini' ? `<p style="font-size:11px;color:var(--muted);margin-top:6px">GitHub Pages runs entirely in the browser. Your Gemini key is stored only in <code>localStorage</code> on this device and sent directly to Google from your browser — never to our server. It IS visible in browser DevTools → Network tab if someone inspects. For a truly secure setup, a small backend proxy is recommended — see <code>/server/README.md</code>.</p>` : `<p style="font-size:11px;color:var(--muted);margin-top:6px">Free Pollinations needs no key but is rate-limited. If it fails frequently, add a free Gemini key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a> (takes 30 sec, no credit card).</p>`;
+    throw new Error(`AI_REQUEST_FAILED::${providerLabel}::${errorName}::${errorMsg}`);
   }
 }
+
+// Wrapper that converts aiGenerate throw into user-facing FAILED HTML (with Retry + offline option)
+async function aiGenerateSafe(mode, input, context){
+  try{
+    const html = await aiGenerate(mode, input, context);
+    return {ok:true, html};
+  }catch(e){
+    const raw = e.message || String(e);
+    // Parse our enriched error
+    let provider="AI", name="Error", msg=raw;
+    if(raw.startsWith("AI_REQUEST_FAILED::")){
+      const parts = raw.split("::");
+      provider = parts[1]||"AI";
+      name = parts[2]||"Error";
+      msg = parts.slice(3).join("::")||raw;
+    }
+    const ch = getChapters(context.class, context.subject)[context.chapter];
+    const chapterName = ch ? ch.title : "this chapter";
+    // Build failed UI — REQUIREMENT: show actual error, not generic demo
+    const failedHtml = `
+      <span class="badge badge-danger">AI request failed · ${esc(provider)}</span>
+      <div style="margin-top:10px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px">
+        <strong style="color:#dc2626">AI request failed</strong>
+        <p style="font-size:13px;margin-top:6px"><b>Provider:</b> ${esc(provider)}<br><b>Status:</b> ${esc(name)}<br><b>Details:</b> ${msg}</p>
+        ${provider==="Pollinations (free)" && msg.includes("429") ? `<p style="font-size:12px;color:var(--muted)">Free tier rate-limited — wait 30 sec or add Gemini key.</p>` : ""}
+        ${provider==="Gemini" && msg.includes("403") ? `<p style="font-size:12px;color:var(--muted)">Key invalid or not enabled — generate new at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style="text-decoration:underline">aistudio.google.com/app/apikey</a></p>` : ""}
+        ${provider==="Gemini" && msg.includes("400") ? `<p style="font-size:12px;color:var(--muted)">Check key format (starts with AIza) and prompt length.</p>` : ""}
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-primary btn-sm" data-ai-retry="${esc(mode)}">Retry ↻</button>
+          <button class="btn btn-sm" data-ai-offline="${esc(mode)}">Show offline explanation (explicit fallback)</button>
+          <a class="btn btn-sm" href="#profile">Add / check key</a>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:8px">Open Console (F12 → Console) for full debug: provider, request sent, HTTP status, API error, parse.</p>
+      </div>
+      <div style="margin-top:10px;padding:10px;background:var(--card-2);border:1px dashed var(--line);border-radius:10px;font-size:12px">
+        <strong>Debug info (also in Console → [AI DEBUG])</strong><br>
+        Provider: ${esc(provider)} · Mode: ${esc(mode)} · Chapter: ${esc(chapterName)}<br>
+        <span style="word-break:break-all">Error: ${msg.slice(0,300)}</span><br>
+        <a href="#" onclick="window.CS.showAIDebug&&window.CS.showAIDebug();return false" style="text-decoration:underline">Show full prompt/debug</a>
+      </div>`;
+    return {ok:false, html: failedHtml, error: msg, provider, name, raw: e};
+  }
+}
+
 
 // --- PROGRESS / DASHBOARD ---
 function pageDashboard(){
@@ -2382,7 +2582,7 @@ function handleClick(e){
     return;
   }
   // delegate button actions
-  const target = e.target.closest("[data-quicktest], #reset-checklist, #mark-complete, #start-practice, #submit-answer, #next-q, #finish-practice, #quit-practice, #practice-weak, #start-daily, #regenerate-daily, [data-review-mistake], [data-mastered], [data-practice-similar], [data-test-mode], #start-custom-test, #test-prev, #test-next, #test-mark, #test-clear, #test-submit, #test-submit-2, [data-test-jump], [data-jump], [data-ask-ai], #save-profile, #profile-theme, #reset-all, #generate-plan, #reset-progress, #retake-weak, [data-copy-formula], [data-ai-mode], #ai-ask, #explain-ai, [data-mark-correct]");
+  const target = e.target.closest("[data-quicktest], #reset-checklist, #mark-complete, #start-practice, #submit-answer, #next-q, #finish-practice, #quit-practice, #practice-weak, #start-daily, #regenerate-daily, [data-review-mistake], [data-mastered], [data-practice-similar], [data-test-mode], #start-custom-test, #test-prev, #test-next, #test-mark, #test-clear, #test-submit, #test-submit-2, [data-test-jump], [data-jump], [data-ask-ai], #save-profile, #profile-theme, #reset-all, #generate-plan, #reset-progress, #retake-weak, [data-copy-formula], [data-ai-mode], #ai-ask, #explain-ai, [data-mark-correct], [data-ai-retry], [data-ai-offline], #test-ai-key, #save-ai-key, #clear-ai-key, #profile-save-key, #profile-clear-key");
   if(!target) return;
 
   if(target.hasAttribute("data-quicktest")){
@@ -2577,12 +2777,50 @@ function handleClick(e){
   if(target.hasAttribute("data-ask-ai")){
     const qid=target.getAttribute("data-ask-ai");
     const q=getQuestionById(qid) || Store.getMistakes()[qid]?.question;
-    const ctx = q? {class:q.class, subject:q.subject, chapter: getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter)} : aiContext;
+    if(!q){ toast("Question not found"); return; }
+    // Find correct chapter index robustly
+    let chIdx = getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter);
+    if(chIdx<0) chIdx = 0;
+    const ctx = {class:q.class, subject:q.subject, chapter: chIdx};
     aiContext=ctx;
+    // Capture selected answer from mistake record if exists
+    let selected = null;
+    const mistake = Store.getMistakes()[qid];
+    if(mistake && mistake.userAnswers && mistake.userAnswers.length){
+      selected = mistake.userAnswers.slice(-1)[0].answer;
+    } else if(practiceState && practiceState.questions){
+      const idx = practiceState.questions.findIndex(x=>x.id===qid);
+      if(idx>=0) selected = practiceState.answers[idx];
+    }
+    const qPayload = {
+      question: q.question,
+      options: q.options || [],
+      correct: q.correct,
+      selectedAnswer: selected,
+      topic: q.topic,
+      chapter: q.chapter,
+      chapterIndex: chIdx,
+      class: q.class,
+      subject: q.subject,
+      marks: q.marks,
+      id: q.id
+    };
+    // stash for retry/offline
+    window.CS = window.CS || {};
+    window.CS._lastAIInput = qPayload;
+    window.CS._lastAIMode = "explain";
+    window.CS._lastAIContext = ctx;
     location.hash=`#ai?class=${ctx.class}&subject=${ctx.subject}&chapter=${ctx.chapter}`;
     setTimeout(async ()=>{
       const out=$("#ai-output");
-      if(out) out.innerHTML=await aiGenerate("explain", q? q.question : "", ctx);
+      const inp=$("#ai-input");
+      if(inp) inp.value = q.question;
+      if(out){
+        const prov = getAIProvider().name;
+        out.innerHTML=`<span class="badge">Connecting to AI...</span><p style="color:var(--muted);font-size:13px;margin-top:8px">Provider: ${prov} · Sending current question to real API...</p><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-top:8px"></div>`;
+        const res = await aiGenerateSafe("explain", qPayload, ctx);
+        out.innerHTML = res.html;
+      }
     },100);
     return;
   }
@@ -2649,10 +2887,22 @@ function handleClick(e){
       chapter: aiContext.chapter||0
     };
     aiContext=ctx;
+    window.CS = window.CS || {};
+    window.CS._lastAIInput = input;
+    window.CS._lastAIMode = mode;
+    window.CS._lastAIContext = ctx;
     const out=$("#ai-output");
     if(out){
-      out.innerHTML=`<div class="skeleton" style="height:18px;width:60%"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:85%;margin-top:8px"></div>`;
-      (async ()=>{ out.innerHTML=await aiGenerate(mode, input, ctx); })();
+      const prov = getAIProvider().name;
+      out.innerHTML=`<span class="badge">Connecting to AI... (${prov})</span><p style="color:var(--muted);font-size:12px;margin-top:6px">Provider: ${prov} · Mode: ${mode} · Sending request...</p><div class="skeleton" style="height:18px;width:60%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:85%;margin-top:8px"></div>`;
+      (async ()=>{
+        if(!input && mode !== "quiz-me"){
+          // allow empty input - will generate chapter explanation
+          // but warn
+        }
+        const res = await aiGenerateSafe(mode, input, ctx);
+        out.innerHTML = res.html;
+      })();
     }
     return;
   }
@@ -2665,23 +2915,56 @@ function handleClick(e){
       chapter: aiContext.chapter||0
     };
     aiContext=ctx;
+    window.CS = window.CS || {};
+    window.CS._lastAIInput = input;
+    window.CS._lastAIMode = "explain";
+    window.CS._lastAIContext = ctx;
     const out=$("#ai-output");
     if(out){
-      out.innerHTML=`<div class="skeleton" style="height:16px;width:70%"></div><div class="skeleton" style="height:14px;width:95%;margin-top:8px"></div>`;
-      (async ()=>{ out.innerHTML=await aiGenerate("explain", input, ctx); })();
+      const prov = getAIProvider().name;
+      out.innerHTML=`<span class="badge">Connecting to AI... (${prov})</span><p style="color:var(--muted);font-size:12px;margin-top:6px">Provider: ${prov} · Sending your question...</p><div class="skeleton" style="height:16px;width:70%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:95%;margin-top:8px"></div>`;
+      (async ()=>{
+        const res = await aiGenerateSafe("explain", input, ctx);
+        out.innerHTML = res.html;
+      })();
     }
     return;
   }
   if(target.id==="explain-ai"){
     const q=practiceState.questions[practiceState.idx];
-    const ctx={class:q.class, subject:q.subject, chapter: getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter)};
-    // for practice, show toast with explanation via AI page
+    let chIdx = getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter);
+    if(chIdx<0) chIdx = 0;
+    const ctx={class:q.class, subject:q.subject, chapter: chIdx};
+    const selected = practiceState.answers[practiceState.idx];
+    const qPayload = {
+      question: q.question,
+      options: q.options || [],
+      correct: q.correct,
+      selectedAnswer: selected,
+      topic: q.topic,
+      chapter: q.chapter,
+      chapterIndex: chIdx,
+      class: q.class,
+      subject: q.subject,
+      marks: q.marks,
+      id: q.id
+    };
+    window.CS = window.CS || {};
+    window.CS._lastAIInput = qPayload;
+    window.CS._lastAIMode = "explain";
+    window.CS._lastAIContext = ctx;
     location.hash=`#ai?class=${q.class}&subject=${q.subject}&chapter=${ctx.chapter}`;
     setTimeout(async ()=>{
       const el=$("#ai-output");
-      if(el) el.innerHTML=await aiGenerate("explain", q.question, ctx);
       const inp=$("#ai-input");
       if(inp) inp.value=q.question;
+      if(el){
+        const prov = getAIProvider().name;
+        el.innerHTML=`<span class="badge">Connecting to AI... (${prov})</span><p style="color:var(--muted);font-size:13px;margin-top:8px">Provider: ${prov} · Explaining your current question (Q${practiceState.idx+1})...</p><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-top:8px"></div>`;
+        // Also show that prompt will contain class/subject/chapter/question/options/correct/selected
+        const res = await aiGenerateSafe("explain", qPayload, ctx);
+        el.innerHTML = res.html;
+      }
     },200);
     return;
   }
@@ -2707,16 +2990,48 @@ function handleClick(e){
   if(target.id==="test-ai-key"){
     const out=document.getElementById("ai-output");
     if(out){
-      out.innerHTML=`<div class="skeleton" style="height:18px;width:60%"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div>`;
+      const prov = getAIProvider().name;
+      out.innerHTML=`<span class="badge">Connecting to AI... (${prov})</span><p style="color:var(--muted);font-size:12px;margin-top:6px">Provider: ${prov} · Sending test prompt...</p><div class="skeleton" style="height:18px;width:60%"></div><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div>`;
       (async ()=>{
         const testPrompt = "Hello! Reply with 'Live AI test ok - ' + today's date in one short sentence.";
+        window.CS._lastAIInput = testPrompt;
+        window.CS._lastAIMode = "test";
+        window.CS._lastAIContext = aiContext;
         try{
           const res = await fetchPollinations(testPrompt);
-          out.innerHTML = `<span class="badge badge-success">Live AI test ✓</span><div style="margin-top:10px;font-size:13.5px">${formatAIText(res)}</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Key works! ${esc((Store.getApiKey()||"").slice(0,6))}****</p>`;
+          out.innerHTML = `<span class="badge badge-success">Live AI test ✓ Real response · ${esc(prov)}</span><div style="margin-top:10px;font-size:13.5px">${formatAIText(res)}</div><p style="color:var(--muted);font-size:11px;margin-top:8px">✓ This is a REAL AI response, not demo. Provider: ${esc(prov)} | Key: ${esc((Store.getApiKey()||"").slice(0,6))}****</p>`;
         }catch(e){
-          out.innerHTML = `<span class="badge badge-danger">Live AI test failed</span><p style="color:var(--danger);font-size:13px;margin-top:8px">${esc(e.message)}</p><p style="color:var(--muted);font-size:12px">Free Pollinations may be rate-limited. Add a free Gemini key from aistudio.google.com/app/apikey for reliable tests.</p>`;
+          out.innerHTML = `<span class="badge badge-danger">AI request failed · ${esc(prov)}</span><div style="margin-top:8px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px"><strong style="color:#dc2626">Live AI test failed</strong><p style="font-size:13px;margin-top:6px"><b>Provider:</b> ${esc(prov)}<br><b>Error:</b> ${esc(e.message)}</p><div class="row" style="margin-top:10px"><button class="btn btn-primary btn-sm" data-ai-retry="test">Retry</button><a class="btn btn-sm" href="#profile">Check key</a></div><p style="font-size:11px;color:var(--muted);margin-top:8px">Check Console → [AI DEBUG] for HTTP status & API error. Demo is NOT shown automatically — only real errors are shown.</p></div>`;
         }
       })();
+    }
+    return;
+  }
+  if(target.hasAttribute("data-ai-retry")){
+    const mode = target.getAttribute("data-ai-retry") || window.CS._lastAIMode || "explain";
+    const ctx = window.CS._lastAIContext || aiContext;
+    const input = window.CS._lastAIInput || $("#ai-input")?.value.trim() || "";
+    const out = document.getElementById("ai-output");
+    if(out){
+      const prov = getAIProvider().name;
+      out.innerHTML=`<span class="badge">Retrying... (${prov})</span><p style="color:var(--muted);font-size:12px;margin-top:6px">Provider: ${prov} · Retrying real API request...</p><div class="skeleton" style="height:14px;width:90%;margin-top:8px"></div>`;
+      (async ()=>{
+        const res = await aiGenerateSafe(mode==="test"?"explain":mode, input, ctx);
+        out.innerHTML = res.html;
+      })();
+    }
+    return;
+  }
+  if(target.hasAttribute("data-ai-offline")){
+    const mode = target.getAttribute("data-ai-offline") || window.CS._lastAIMode || "explain";
+    const ctx = window.CS._lastAIContext || aiContext;
+    const input = window.CS._lastAIInput || $("#ai-input")?.value.trim() || "";
+    const out = document.getElementById("ai-output");
+    if(out){
+      const ch = getChapters(ctx.class, ctx.subject)[ctx.chapter];
+      const chapterName = ch ? ch.title : "this chapter";
+      const offlineHtml = buildOfflineFallback(mode, input, ctx);
+      out.innerHTML = `<span class="badge badge-warn">Offline fallback — explicitly requested</span><div style="margin-top:10px;padding:12px;border:1px dashed var(--warning);background:var(--warning-soft);border-radius:10px;font-size:12px"><b>Note:</b> This is an <b>explicitly requested offline explanation</b> for <b>${esc(chapterName)}</b> — NOT a live AI response. Live AI failed; you chose to view the fallback. For a real response, click Retry or add a Gemini key.</div><div style="margin-top:10px;font-size:13.5px;line-height:1.6">${offlineHtml}</div><div class="row" style="margin-top:12px"><button class="btn btn-primary btn-sm" data-ai-retry="${esc(mode)}">Retry live AI</button></div>`;
     }
     return;
   }
@@ -2795,6 +3110,81 @@ window.CS = window.CS || {};
 window.CS.getQuestions = getQuestions;
 window.CS.FORMULAS = FORMULAS;
 window.CS.DEFINITIONS = DEFINITIONS;
+window.CS.getAIProvider = getAIProvider;
+window.CS.buildAIPrompt = buildAIPrompt;
+window.CS.buildAIPromptForQuestion = buildAIPromptForQuestion;
+window.CS.buildOfflineFallback = buildOfflineFallback;
+window.CS.aiDebugLog = aiDebugLog;
+window.CS.aiGenerate = aiGenerate;
+window.CS.aiGenerateSafe = aiGenerateSafe;
+window.CS.fetchPollinations = fetchPollinations;
+window.CS.fetchGemini = fetchGemini;
+window.CS._lastAIRequest = null;
+window.CS._lastAIResponse = null;
+window.CS._lastAIError = null;
+window.CS._lastAIInput = null;
+window.CS._lastAIMode = null;
+window.CS._lastAIContext = null;
+window.CS.showAIDebug = function(){
+  console.log("=== CS AI DEBUG ===");
+  console.log("Provider:", getAIProvider());
+  console.log("Last Input:", window.CS._lastAIInput);
+  console.log("Last Mode:", window.CS._lastAIMode);
+  console.log("Last Context:", window.CS._lastAIContext);
+  console.log("Last Request:", window.CS._lastAIRequest);
+  console.log("Last Response:", window.CS._lastAIResponse);
+  console.log("Last Error:", window.CS._lastAIError);
+  if(window.CS._lastAIRequest){
+    const p = window.CS._lastAIRequest.prompt;
+    console.log("Last Prompt (full):", p);
+    console.log("Prompt preview:", p.slice(0,400));
+  }
+  alert("AI Debug logged to Console (F12 → Console). Provider: " + getAIProvider().name + "\nSee console for provider, HTTP status, error, parse details.");
+};
+window.CS.testAIWithQuestions = async function(){
+  const testQs = [
+    getQuestionById("acc12-goodwill-001"),
+    getQuestionById("eco12-ad-001"),
+    getQuestionById("bus12-control-001")
+  ].filter(Boolean);
+  console.log("=== Testing AI with 3 distinct questions ===");
+  for(let i=0;i<testQs.length;i++){
+    const q = testQs[i];
+    let chIdx = getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter);
+    if(chIdx<0) chIdx=0;
+    const ctx={class:q.class, subject:q.subject, chapter:chIdx};
+    const payload={question:q.question, options:q.options||[], correct:q.correct, selectedAnswer:(q.correct+1)%(q.options.length||2), topic:q.topic, chapter:q.chapter, chapterIndex:chIdx, class:q.class, subject:q.subject, marks:q.marks, id:q.id};
+    console.log("\n--- Question "+(i+1)+" ---");
+    console.log("Class:",q.class,"Subject:",q.subject,"Chapter:",q.chapter,"Topic:",q.topic);
+    console.log("Q:",q.question.slice(0,120));
+    console.log("Options:",q.options);
+    console.log("Correct:",q.correct,"Selected (simulated wrong):",payload.selectedAnswer);
+    const prompt = buildAIPrompt("explain", payload, ctx);
+    console.log("Prompt built:",prompt.slice(0,300)+"...");
+    // verify prompt contains question data
+    const containsQ = prompt.includes(q.question.slice(0,20).replace(/[^\x00-\x7F]/g,""));
+    const containsOpts = q.options && q.options.length ? prompt.includes(q.options[0].slice(0,10).replace(/[^\x00-\x7F]/g,"")) : true;
+    console.log("Prompt contains question text?", containsQ, "contains options?", containsOpts);
+    if(!containsQ) console.warn("FAIL: prompt does not contain current question!");
+  }
+  console.log("\n=== Prompt generation test done — now testing live AI (if network available) ===");
+  // Optionally try one live call (free tier may be rate-limited)
+  try{
+    const q = testQs[0];
+    let chIdx = getChapters(q.class,q.subject).findIndex(c=>c.title===q.chapter);
+    if(chIdx<0) chIdx=0;
+    const ctx={class:q.class, subject:q.subject, chapter:chIdx};
+    const payload={question:q.question, options:q.options||[], correct:q.correct, selectedAnswer:(q.correct+1)%(q.options.length||2), topic:q.topic, chapter:q.chapter, chapterIndex:chIdx, class:q.class, subject:q.subject, marks:q.marks, id:q.id};
+    console.log("Sending live AI request for Q1...");
+    const html = await aiGenerate("explain", payload, ctx);
+    console.log("Live AI succeeded, html length", html.length, "preview", html.slice(0,300));
+    console.log("Check html contains question-specific content? Should mention chapter or question terms");
+  }catch(e){
+    console.error("Live AI failed (expected if offline/rate-limited):", e.message.slice(0,500));
+    console.log("This is CORRECT behavior — should show FAILED UI, not silent demo. Error is logged here.");
+  }
+  console.log("=== End test ===");
+};
 
 // initial render if not already
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", render);
