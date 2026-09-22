@@ -1,1065 +1,780 @@
-/* ============================================================
-   Commerce-Students · app.js
-   Pure helpers are exposed on window.CS (used by node tests);
-   DOM code runs only in a browser.
-   ============================================================ */
 (function () {
-  'use strict';
+  "use strict";
 
-  var W = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this);
-  W.QB = W.QB || {};
-
-  /* ---------------- constants ---------------- */
-
-  var SUBJECTS = ['accountancy', 'business', 'economics', 'english', 'information'];
-  var SUBJECT_NAMES = {
-    accountancy: 'Accountancy',
-    business: 'Business Studies',
-    economics: 'Economics',
-    english: 'English Core',
-    information: 'Information Technology'
+  var app = document.getElementById("app");
+  var searchInput = document.getElementById("global-search-input");
+  var themeToggle = document.getElementById("theme-toggle");
+  var content = window.CS_CONTENT || { classes: {}, formulas: [], definitions: [], questions: [] };
+  var LS = {
+    theme: "cs-theme-v2",
+    profile: "cs-profile-v2",
+    attempts: "cs-attempts-v2",
+    mistakes: "cs-mistakes-v2",
+    completed: "cs-completed-v2",
+    daily: "cs-daily-v2"
   };
-  var SUBJECT_ICONS = {
-    accountancy: '₹',
-    business: '⇈',
-    economics: '∿',
-    english: 'Aa',
-    information: '</>'
+  var STATE = {
+    route: { page: "home" },
+    profile: loadJSON(LS.profile, { name: "Student", class: 12, subjects: ["Accountancy", "Business Studies", "Economics"], examDate: "", dailyTarget: 30 }),
+    attempts: loadJSON(LS.attempts, []),
+    mistakes: loadJSON(LS.mistakes, {}),
+    completedTopics: loadJSON(LS.completed, {}),
+    currentPractice: null,
+    currentTest: null,
+    testTimerId: null
   };
-  var CURRICULUM_LINKS = {
-    accountancy: 'https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Accountancy_SecP2_2026-27.pdf',
-    business: 'https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/BusinessStudies_SecP2_2026-27.pdf',
-    economics: 'https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Economics_SecP2_2026-27.pdf',
-    english: 'https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/English_core_SecP2_2026-27.pdf',
-    information: 'https://cbseacademic.nic.in/web_material/Curriculum27/SrSec/802-IT.pdf'
-  };
-  var BANK_KEY = { accountancy: 'acc', business: 'bus', economics: 'eco', english: 'eng', information: 'it' };
-  var TYPE_ORDER = ['mcq', 'short', 'long', 'mixed', 'full'];
-  var TYPE_META = {
-    mcq: { label: 'MCQ Paper', desc: '20 multiple-choice questions · auto-graded with explanations', duration: '45 min', marksNote: '1 mark each' },
-    short: { label: 'Short Answer Paper', desc: '20 short-answer questions with model answer points', duration: '60 min', marksNote: '2 marks each' },
-    long: { label: 'Long Answer Paper', desc: '20 long-answer questions with model answer points', duration: '90 min', marksNote: '4 marks each' },
-    mixed: { label: 'Mixed Paper', desc: '10 MCQ + 5 short + 3 long in one sitting', duration: '60 min', marksNote: '1 / 2 / 4 marks' },
-    full: { label: 'All-in-One Paper', desc: 'Full subject paper in the current CBSE layout with correct marks', duration: '3 hours', marksNote: '80 theory · 60 theory for IT' }
-  };
-
-  var STORAGE = {
-    theme: 'cs-theme',
-    rev: 'cs-rev',
-    check: 'cs-check',
-    bookmark: 'cs-bookmark',
-    paper: 'cs-paper'
-  };
-
-  /* ---------------- storage ---------------- */
 
   function loadJSON(key, fallback) {
     try {
-      var raw = W.localStorage ? W.localStorage.getItem(key) : null;
+      var raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : fallback;
     } catch (e) { return fallback; }
   }
   function saveJSON(key, value) {
-    try { if (W.localStorage) W.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+  function esc(v) {
+    return String(v).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]; });
+  }
+  function setTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    saveJSON(LS.theme, theme);
   }
 
-  /* ---------------- pure helpers ---------------- */
+  function applyTheme() {
+    var saved = loadJSON(LS.theme, "light");
+    setTheme(saved === "dark" ? "dark" : "light");
+  }
 
-  function esc(value) {
-    return String(value).replace(/[&<>'"]/g, function (ch) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch];
+  function getBaseRoute(hash) {
+    var raw = (hash || "#home").replace(/^#/, "");
+    var parts = raw.split("/").filter(Boolean);
+    if (!parts.length) return { page: "home" };
+    if (["home", "study", "practice", "tests", "revision", "ai", "progress", "profile", "mistakes"].indexOf(parts[0]) !== -1) {
+      return { page: parts[0], args: parts.slice(1) };
+    }
+    return { page: "home" };
+  }
+
+  function allQuestions(filters) {
+    return content.questions.filter(function (q) {
+      if (!filters) return true;
+      return (!filters.class || q.class === Number(filters.class)) &&
+        (!filters.subject || q.subject === filters.subject) &&
+        (!filters.chapter || q.chapter === filters.chapter) &&
+        (!filters.topic || q.topic === filters.topic) &&
+        (!filters.type || q.type === filters.type) &&
+        (!filters.difficulty || q.difficulty === filters.difficulty);
     });
   }
 
-  function bank(grade, subject) {
-    var key = (BANK_KEY[subject] || subject) + '-' + grade;
-    return (W.QB && W.QB[key]) || null;
+  function topicKey(q) {
+    return [q.class, q.subject, q.chapter, q.topic].join("|");
   }
 
-  function bankTotals(grade, subject) {
-    var b = bank(grade, subject);
-    if (!b) return null;
-    var t = { mcq: 0, sh: 0, lg: 0, cs: 0, chapters: b.chapters.length };
-    b.chapters.forEach(function (ch) {
-      t.mcq += (ch.mcq || []).length;
-      t.sh += (ch.sh || []).length;
-      t.lg += (ch.lg || []).length;
-      t.cs += (ch.cs || []).length;
+  function computeTopicStats() {
+    var map = {};
+    STATE.attempts.forEach(function (a) {
+      if (!map[a.topicKey]) map[a.topicKey] = { correct: 0, total: 0, subject: a.subject, chapter: a.chapter, topic: a.topic };
+      map[a.topicKey].total++;
+      if (a.correct) map[a.topicKey].correct++;
     });
-    return t;
+    return map;
   }
 
-  function selectedPools(grade, subject, chapterSel) {
-    var b = bank(grade, subject);
-    if (!b) return [];
-    return b.chapters
-      .map(function (ch, ci) {
-        return {
-          ci: ci,
-          title: ch.t,
-          mcq: ch.mcq || [],
-          sh: ch.sh || [],
-          lg: ch.lg || [],
-          cs: ch.cs || []
-        };
-      })
-      .filter(function (p) { return chapterSel && chapterSel[p.ci]; });
+  function getTopicStatus(topicKeyStr) {
+    var stats = computeTopicStats()[topicKeyStr];
+    if (!stats || stats.total === 0) return { label: "Not started", className: "muted" };
+    var acc = Math.round((stats.correct / stats.total) * 100);
+    if (stats.total >= 5 && acc > 75) return { label: "Strong", className: "status-strong" };
+    if (acc < 50) return { label: "Needs revision", className: "status-needs" };
+    return { label: "In progress", className: "status-improving" };
   }
 
-  /* Pick across selected chapters, most-remaining chapter first
-     (ties broken by chapter order — deterministic).
-     cursor[ci+':'+kind] = items already consumed from this chapter+kind,
-     shared between sections, so every unique question in the selected
-     chapters is used before any question repeats. Wraps (reusing) only
-     when the whole pool is exhausted before `count`. */
-  function pickKind(pools, kind, count, cursor) {
-    var result = [];
-    var wrapped = false;
-    var totalAvailable = pools.reduce(function (s, p) { return s + p[kind].length; }, 0);
-    var active = pools.filter(function (p) { return p[kind].length; });
-    var guard = 0;
-    while (result.length < count && active.length && guard < 5000) {
-      guard++;
-      var best = 0;
-      for (var i = 1; i < active.length; i++) {
-        var remA = active[i][kind].length - (cursor[active[i].ci + ':' + kind] || 0);
-        var remB = active[best][kind].length - (cursor[active[best].ci + ':' + kind] || 0);
-        if (remA > remB) best = i;
-      }
-      var p = active[best];
-      var key = p.ci + ':' + kind;
-      var used = cursor[key] || 0;
-      var pos = used % p[kind].length;
-      if (used >= p[kind].length) wrapped = true;
-      result.push({ ci: p.ci, qi: pos, item: p[kind][pos] });
-      cursor[key] = used + 1;
+  function markAttempt(q, isCorrect, userAnswer, sessionType) {
+    STATE.attempts.push({
+      id: q.id,
+      class: q.class,
+      subject: q.subject,
+      chapter: q.chapter,
+      topic: q.topic,
+      topicKey: topicKey(q),
+      correct: !!isCorrect,
+      userAnswer: userAnswer,
+      sessionType: sessionType,
+      timestamp: new Date().toISOString()
+    });
+    if (!isCorrect) {
+      var m = STATE.mistakes[q.id] || { count: 0, lastUserAnswer: "", firstSeen: new Date().toISOString() };
+      m.count += 1;
+      m.lastUserAnswer = userAnswer == null ? "" : String(userAnswer);
+      m.lastSeen = new Date().toISOString();
+      m.questionId = q.id;
+      STATE.mistakes[q.id] = m;
     }
-    return { items: result, wrapped: wrapped, totalAvailable: totalAvailable };
+    saveJSON(LS.attempts, STATE.attempts);
+    saveJSON(LS.mistakes, STATE.mistakes);
   }
 
-  var KIND_CODE = { mcq: 'm', sh: 's', lg: 'l', cs: 'c' };
-
-  function normItem(kind, ci, qi, raw, num, marks, grade, subject) {
-    var base = {
-      kind: kind,
-      id: grade + '-' + subject + '-c' + ci + '-' + KIND_CODE[kind] + qi,
-      num: num,
-      marks: marks,
-      chapter: ci
-    };
-    if (kind === 'mcq') {
-      base.q = raw[0];
-      base.opts = raw[1];
-      base.correct = raw[2];
-      base.exp = raw[3];
-    } else {
-      base.q = raw[0];
-      base.model = raw[1];
-    }
-    return base;
-  }
-
-  /* Build a full paper. Deterministic: same spec => same paper. */
-  function buildPaper(spec) {
-    var b = bank(spec.grade, spec.subject);
-    if (!b) return null;
-    var pools = selectedPools(spec.grade, spec.subject, spec.chapters);
-    var isIT = spec.subject === 'information';
-    var sections = [];
-    var total = 0;
-    var duration;
-    var reused = false;
-    var extraNote = '';
-    var cursor = {};
-    var numCounter = 0;
-
-    function addSection(heading, kind, count, marksEach) {
-      var pick = pickKind(pools, kind, count, cursor);
-      reused = reused || pick.wrapped;
-      var items = pick.items.map(function (it, i) {
-        numCounter++;
-        return normItem(kind, it.ci, it.qi, it.item, numCounter, marksEach, spec.grade, spec.subject);
-      });
-      if (items.length) {
-        sections.push({ heading: heading, items: items, marksEach: marksEach });
-        total += items.length * marksEach;
-      }
-    }
-
-    if (spec.type === 'mcq') {
-      duration = TYPE_META.mcq.duration;
-      addSection('Section A · Multiple Choice Questions', 'mcq', 20, 1);
-      extraNote = 'Tick one option per question, then press “Check answers” for instant scoring and explanations.';
-    } else if (spec.type === 'short') {
-      duration = TYPE_META.short.duration;
-      addSection('Short Answer Questions', 'sh', 20, 2);
-      extraNote = 'Each question carries 2 marks. Use the model points to structure your own answer.';
-    } else if (spec.type === 'long') {
-      duration = TYPE_META.long.duration;
-      addSection('Long Answer Questions', 'lg', 20, 4);
-      extraNote = 'Each question carries 4 marks. Aim for 6–10 points with an opening line and a short conclusion.';
-    } else if (spec.type === 'mixed') {
-      duration = TYPE_META.mixed.duration;
-      addSection('Section A · Multiple Choice (10 × 1)', 'mcq', 10, 1);
-      addSection('Section B · Short Answer (5 × 2)', 'sh', 5, 2);
-      addSection('Section C · Long Answer (3 × 4)', 'lg', 3, 4);
-      extraNote = 'A quick full-cycle rehearsal: objective, short and long in one paper.';
-    } else { /* full */
-      duration = '3 hours';
-      if (isIT) {
-        addSection('Section A · Objective (16 × 1)', 'mcq', 16, 1);
-        addSection('Section B · Very Short Answer (8 × 2)', 'sh', 8, 2);
-        addSection('Section C · Short Answer (5 × 4)', 'lg', 5, 4);
-        addSection('Section D · Application / Case Based (2 × 4)', 'cs', 2, 4);
-        extraNote = 'CBSE format for IT (802): Theory 60 marks in this paper · Practical 40 marks assessed outside the exam · 3 hours.';
-      } else {
-        addSection('Section A · MCQs & Assertion–Reason (20 × 1)', 'mcq', 20, 1);
-        addSection('Section B · Very Short Answer (5 × 2)', 'sh', 5, 2);
-        addSection('Section C · Short Answer (6 × 3)', 'lg', 6, 3);
-        addSection('Section D · Long Answer (4 × 5)', 'lg', 4, 5);
-        addSection('Section E · Case-Based (3 × 4)', 'cs', 3, 4);
-        extraNote = 'CBSE format: Theory 80 marks in this paper · Project / internal assessment 20 marks outside the exam · 3 hours.';
-      }
-    }
-
-    if (reused) {
-      extraNote += ' Note: some questions repeat because the selected chapters hold fewer items than this paper needs — widen your chapter selection to fill every slot uniquely.';
-    }
-
+  function calcOverview() {
+    var total = STATE.attempts.length;
+    var correct = STATE.attempts.filter(function (a) { return a.correct; }).length;
+    var tests = STATE.attempts.filter(function (a) { return a.sessionType === "test"; }).length;
     return {
-      spec: spec,
-      title: 'Class ' + spec.grade + ' · ' + SUBJECT_NAMES[spec.subject],
-      typeLabel: TYPE_META[spec.type].label,
-      sections: sections,
       total: total,
-      duration: duration,
-      extraNote: extraNote,
-      questionCount: numCounter
+      accuracy: total ? Math.round((correct / total) * 100) : 0,
+      tests: tests,
+      mistakes: Object.keys(STATE.mistakes).length
     };
   }
 
-  W.CS = {
-    esc: esc,
-    bank: bank,
-    bankTotals: bankTotals,
-    buildPaper: buildPaper,
-    pickKind: pickKind,
-    selectedPools: selectedPools,
-    SUBJECTS: SUBJECTS,
-    SUBJECT_NAMES: SUBJECT_NAMES,
-    TYPE_META: TYPE_META,
-    TYPE_ORDER: TYPE_ORDER,
-    CURRICULUM_LINKS: CURRICULUM_LINKS,
-    STORAGE: STORAGE
-  };
-
-  /* ============================================================
-     Browser only from here
-     ============================================================ */
-  var HAS_DOM = typeof document !== 'undefined' && !!document.getElementById;
-  if (!HAS_DOM) return;
-
-  var app = document.getElementById('app');
-  var brandMark = document.getElementById('brand-mark');
-
-  /* ---------------- icons ---------------- */
-
-  var LOGO_MARKUP = '<img src="assets/logo.svg" alt="" loading="eager" decoding="async">';
-
-  var ICONS = {
-    sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5 5l1.7 1.7M17.3 17.3L19 19M19 5l-1.7 1.7M6.7 17.3L5 19"/></svg>',
-    moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20.2 14.2A8.6 8.6 0 0 1 9.8 3.8a8.6 8.6 0 1 0 10.4 10.4z"/></svg>',
-    menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
-    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-    gemini: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.8l2.6 7.6 7.6 2.6-7.6 2.6L12 22.2l-2.6-7.6-7.6-2.6 7.6-2.6z"/></svg>',
-    notebooklm: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="2.8" width="16" height="18.4" rx="2.6" stroke="currentColor" stroke-width="1.8"/><path d="M8.4 2.8v18.4" stroke="currentColor" stroke-width="1.8"/><path fill="currentColor" d="M15.2 8.9l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z"/></svg>'
-  };
-  brandMark.innerHTML = LOGO_MARKUP;
-
-  /* ---------------- theme ---------------- */
-
-  var themeBtn = document.getElementById('theme-toggle');
-  function currentTheme() {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  }
-  function paintThemeButton() {
-    var dark = currentTheme() === 'dark';
-    themeBtn.innerHTML = (dark ? ICONS.sun : ICONS.moon) + '<span>' + (dark ? 'Light mode' : 'Dark mode') + '</span>';
-    themeBtn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
-  }
-  var savedTheme = loadJSON(STORAGE.theme, null);
-  if (savedTheme === 'dark' || savedTheme === 'light') document.documentElement.setAttribute('data-theme', savedTheme);
-  paintThemeButton();
-  themeBtn.addEventListener('click', function () {
-    var next = currentTheme() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    saveJSON(STORAGE.theme, next);
-    paintThemeButton();
-  });
-
-  /* ---------------- mobile nav ---------------- */
-
-  var menuBtn = document.getElementById('menu-toggle');
-  var mobileNav = document.getElementById('mobile-nav');
-  var NAV_LINKS = [
-    { key: 'home', label: 'Home', href: '#home' },
-    { key: 'classes', label: 'Classes', href: '#classes' },
-    { key: 'revision', label: 'Revision', href: '#revision' },
-    { key: 'ai', label: 'AI', href: '#ai' }
-  ];
-  mobileNav.innerHTML = NAV_LINKS.map(function (l) {
-    return '<a href="' + l.href + '" data-mnav="' + l.key + '">' + l.label + '</a>';
-  }).join('');
-  var menuOpen = false;
-  function paintMenu() {
-    mobileNav.classList.toggle('open', menuOpen);
-    menuBtn.setAttribute('aria-expanded', String(menuOpen));
-    menuBtn.innerHTML = menuOpen ? ICONS.close : ICONS.menu;
-  }
-  menuBtn.addEventListener('click', function () { menuOpen = !menuOpen; paintMenu(); });
-  mobileNav.addEventListener('click', function () { menuOpen = false; paintMenu(); });
-  function setNavActive(key) {
-    document.querySelectorAll('.nav-link').forEach(function (a) {
-      a.classList.toggle('active', a.getAttribute('data-nav') === key);
+  function subjectStats() {
+    var by = {};
+    STATE.attempts.forEach(function (a) {
+      if (!by[a.subject]) by[a.subject] = { total: 0, correct: 0 };
+      by[a.subject].total++;
+      if (a.correct) by[a.subject].correct++;
     });
-    document.querySelectorAll('[data-mnav]').forEach(function (a) {
-      a.classList.toggle('active', a.getAttribute('data-mnav') === key);
+    return by;
+  }
+
+  function todaysDaily10() {
+    var key = new Date().toISOString().slice(0, 10);
+    var cache = loadJSON(LS.daily, {});
+    if (cache.date === key && Array.isArray(cache.ids)) return cache.ids.map(getQuestionById).filter(Boolean);
+    var weakTopicKeys = Object.keys(computeTopicStats()).filter(function (k) {
+      var s = computeTopicStats()[k];
+      var acc = s.total ? (s.correct / s.total) * 100 : 0;
+      return s.total >= 3 && acc < 60;
     });
+    var source = allQuestions({ class: STATE.profile.class });
+    source = source.filter(function (q) { return weakTopicKeys.length ? weakTopicKeys.indexOf(topicKey(q)) !== -1 : true; });
+    var recentMistakeIds = Object.keys(STATE.mistakes).slice(0, 10);
+    var mixed = source.concat(recentMistakeIds.map(getQuestionById).filter(Boolean)).filter(Boolean);
+    var uniq = {};
+    var out = [];
+    mixed.forEach(function (q) {
+      if (!uniq[q.id] && out.length < 10) { uniq[q.id] = true; out.push(q); }
+    });
+    if (out.length < 10) {
+      allQuestions({ class: STATE.profile.class }).forEach(function (q) {
+        if (!uniq[q.id] && out.length < 10) { uniq[q.id] = true; out.push(q); }
+      });
+    }
+    saveJSON(LS.daily, { date: key, ids: out.map(function (q) { return q.id; }) });
+    return out;
   }
 
-  /* ---------------- shared page bits ---------------- */
-
-  function crumbs(parts) {
-    return '<nav class="breadcrumbs" aria-label="Breadcrumb">' +
-      parts.map(function (p, i) {
-        var last = i === parts.length - 1;
-        var inner = last ? '<span class="current">' + esc(p.label) + '</span>' : '<a href="' + p.href + '">' + esc(p.label) + '</a>';
-        return (i ? '<span aria-hidden="true">/</span>' : '') + inner;
-      }).join('') + '</nav>';
+  function getQuestionById(id) {
+    return content.questions.find(function (q) { return q.id === id; });
   }
 
-  function subjectBlurb(key) {
-    return {
-      accountancy: 'Journals, ledgers, statements — and the partnership and company accounts of Class 12.',
-      business: 'From the purpose of business to management principles, finance, markets and consumer protection.',
-      economics: 'Micro and macro with statistics: demand and supply, national income, money and the Indian economy.',
-      english: 'Reading, note-making and writing skills plus the Hornbill, Flamingo, Snapshots and Vistas texts.',
-      information: 'The 802 course: employability skills, computer organization, networks, office tools, SQL and Java.'
-    }[key];
-  }
-
-  function subjectCardHTML(grade, key) {
-    var totals = bankTotals(grade, key) || { chapters: 0, mcq: 0, sh: 0, lg: 0, cs: 0 };
-    return '<a class="subject-card" href="#class-' + grade + '/' + key + '">' +
-      '<span class="subj-icon" aria-hidden="true">' + SUBJECT_ICONS[key] + '</span>' +
-      '<h3>' + esc(SUBJECT_NAMES[key]) + '</h3>' +
-      '<p>' + esc(subjectBlurb(key)) + '</p>' +
-      '<span class="subj-meta"><span>' + totals.chapters + ' chapters</span><i></i><span>' + (totals.mcq + totals.sh + totals.lg + totals.cs) + ' original questions</span></span>' +
-    '</a>';
-  }
-
-  /* ---------------- home ---------------- */
-
-  function classCardHTML(grade) {
-    return '<a class="class-card" data-grade="' + (grade === 11 ? 'XI' : 'XII') + '" href="#class-' + grade + '">' +
-      '<span class="class-kicker">Year ' + (grade - 10) + (grade === 12 ? ' · Board year' : ' · Foundation year') + '</span>' +
-      '<h3>Class ' + grade + '</h3>' +
-      '<span class="class-count">5 subjects · chapter roadmaps · revision papers</span>' +
-      '<span class="btn">Open Class ' + grade + ' →</span>' +
-    '</a>';
+  function navActive(page) {
+    document.querySelectorAll("[data-nav]").forEach(function (a) {
+      a.classList.toggle("active", a.getAttribute("data-nav") === page);
+    });
   }
 
   function renderHome() {
-    setNavActive('home');
-    document.title = 'Commerce-Students · CBSE Commerce Revision';
+    navActive("home");
+    document.title = "Commerce Students — CBSE Commerce Study Companion";
+    var today = calcOverview();
+    var daily10 = todaysDaily10();
     app.innerHTML =
-      '<section class="shell home-hero"><div class="hero-copy">' +
-        '<div class="hero-logo" aria-hidden="true">' + LOGO_MARKUP + '</div>' +
-        '<span class="eyebrow">Commerce · XI – XII</span>' +
-        '<h1>Commerce-<em>Students</em></h1>' +
-        '<p class="hero-sub">One quiet place to revise the whole commerce syllabus — chapter checklists, original questions and practice papers set in the current CBSE format.</p>' +
-        '<div class="hero-actions">' +
-          '<a class="btn btn-solid" href="#class-11">Start with Class 11</a>' +
-          '<a class="btn" href="#class-12">Start with Class 12</a>' +
-          '<a class="btn btn-soft" href="#revision">Build a revision paper</a>' +
+      '<section class="hero">' +
+        '<span class="badge">Commerce Students</span>' +
+        '<h1>Study Commerce smarter.</h1>' +
+        '<p>Learn concepts, practice exam-style questions, fix mistakes, revise fast, and track your preparation in one focused workspace.</p>' +
+        '<div class="actions">' +
+          '<a class="btn btn-solid" href="#study">Start Studying</a>' +
+          '<a class="btn btn-soft" href="#study">Explore Subjects</a>' +
         '</div>' +
-        '<div class="hero-meta">' +
-          '<span><i></i>5 subjects</span>' +
-          '<span><i></i>Original questions</span>' +
-          '<span><i></i>CBSE-format papers</span>' +
-          '<span><i></i>Progress saved on this device</span>' +
-        '</div>' +
-      '</div></section>' +
-      '<section class="shell section"><div class="section-head">' +
-        '<div><span class="eyebrow">Choose your class</span><h2>Two years, one system.</h2></div>' +
-        '<div><p>Open a class to see every subject, tick off chapters as you revise and generate papers at any step.</p></div>' +
-      '</div><div class="class-grid">' +
-        classCardHTML(11) + classCardHTML(12) +
-      '</div></section>' +
-      '<section class="shell section"><div class="section-head">' +
-        '<div><span class="eyebrow">The subjects</span><h2>What you can revise today.</h2></div>' +
-      '</div><div class="subjects-strip">' +
-        SUBJECTS.map(function (key) {
-          var totals11 = bankTotals(11, key) || {};
-          return '<a class="strip-card" href="#class-11/' + key + '">' +
-            '<span class="strip-icon" aria-hidden="true">' + SUBJECT_ICONS[key] + '</span>' +
-            '<strong>' + esc(SUBJECT_NAMES[key]) + '</strong>' +
-            '<small>' + (totals11.chapters || 0) + ' chapters · Class 11 & 12</small>' +
-          '</a>';
-        }).join('') +
-      '</div></section>';
-  }
-
-  /* ---------------- classes & class pages ---------------- */
-
-  function renderClasses() {
-    setNavActive('classes');
-    document.title = 'Classes · Commerce-Students';
-    var block = function (grade) {
-      return '<section class="class-block">' +
-        '<div class="class-block-head"><span class="class-badge">Class ' + grade + '</span><h2>Class ' + grade + ' subjects</h2>' +
-        '<a class="btn btn-soft btn-sm" href="#revision">Revise this class →</a></div>' +
-        '<div class="subjects-grid">' + SUBJECTS.map(function (key) { return subjectCardHTML(grade, key); }).join('') + '</div>' +
-      '</section>';
-    };
-    app.innerHTML = '<section class="shell page-view">' +
-      '<div class="eyebrow">Both years</div>' +
-      '<h1 class="page-title">Classes</h1>' +
-      '<p class="page-intro">Pick your class, then open a subject to see its chapter checklist, key points and revision tools.</p>' +
-      block(11) + block(12) +
-    '</section>';
-  }
-
-  function renderClass(grade) {
-    setNavActive('classes');
-    document.title = 'Class ' + grade + ' · Commerce-Students';
-    app.innerHTML =
-      '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'Class ' + grade }]) +
-        '<div class="eyebrow">Year ' + (grade - 10) + '</div>' +
-        '<h1 class="page-title">Class ' + grade + '</h1>' +
-        '<p class="page-intro">Open a subject for its chapter checklist and key points — or jump straight to the revision builder for this class.</p>' +
-        '<div class="subjects-grid" style="margin-top:24px">' +
-          SUBJECTS.map(function (key) { return subjectCardHTML(grade, key); }).join('') +
-        '</div>' +
-        '<div class="rev-actions"><a class="btn btn-solid" href="#revision">Build a Class ' + grade + ' paper →</a></div>' +
+      '</section>' +
+      '<section class="grid cols-2" style="margin-top:14px">' +
+        '<article class="card"><h3>Choose your class</h3><p class="muted">Current class: <strong>Class ' + esc(STATE.profile.class) + '</strong></p>' +
+          '<div class="actions"><button class="btn btn-soft" data-action="set-class" data-value="11">Class 11</button><button class="btn btn-soft" data-action="set-class" data-value="12">Class 12</button></div>' +
+        '</article>' +
+        '<article class="card"><h3>Today\'s 10</h3><p class="muted">' + daily10.length + ' questions · ~10 minutes</p><p class="small">Based on your recent practice.</p>' +
+          '<div class="actions"><a class="btn btn-solid" href="#practice/daily10">Start</a></div></article>' +
+      '</section>' +
+      '<section class="kpis" style="margin-top:14px">' +
+        '<article class="card"><div class="kpi">' + today.total + '</div><div class="small muted">Questions solved</div></article>' +
+        '<article class="card"><div class="kpi">' + today.accuracy + '%</div><div class="small muted">Accuracy</div></article>' +
+        '<article class="card"><div class="kpi">' + today.tests + '</div><div class="small muted">Test attempts</div></article>' +
+        '<article class="card"><div class="kpi">' + today.mistakes + '</div><div class="small muted">Mistake topics</div></article>' +
+      '</section>' +
+      '<section class="grid cols-3" style="margin-top:14px">' +
+        '<a class="card" href="#study"><h3>📚 Study</h3><p>Chapter-wise lessons and topic status.</p></a>' +
+        '<a class="card" href="#practice"><h3>📝 Practice</h3><p>Chapter and topic filters, instant feedback.</p></a>' +
+        '<a class="card" href="#tests"><h3>⏱ Take a Test</h3><p>Timed quick and chapter tests.</p></a>' +
+        '<a class="card" href="#revision"><h3>🔄 Revise</h3><p>5-minute revision, formulas, definitions.</p></a>' +
+        '<a class="card" href="#ai"><h3>🤖 Ask AI</h3><p>Context-aware prompt builder with study actions.</p></a>' +
+        '<a class="card" href="#progress"><h3>📊 Track Progress</h3><p>Overall and weak-topic analytics.</p></a>' +
       '</section>';
   }
 
-  /* ---------------- subject detail ---------------- */
+  function classSubjects(grade) {
+    return content.classes[String(grade)] || {};
+  }
 
-  function checklistKey(grade, subject) { return grade + '-' + subject; }
-  function loadChecklist(grade, subject, length) {
-    var raw = (loadJSON(STORAGE.check, {}) || {})[checklistKey(grade, subject)] || [];
-    var out = [];
-    for (var i = 0; i < length; i++) out.push(!!raw[i]);
+  function renderStudy(args) {
+    navActive("study");
+    if (!args || !args.length) {
+      var subjects = classSubjects(STATE.profile.class);
+      var cards = Object.keys(subjects).map(function (key) {
+        var s = subjects[key];
+        return '<a class="card" href="#study/' + key + '"><h3>' + esc(s.name) + '</h3><p>' + esc(s.description) + '</p><p class="small muted">' + s.chapters.length + ' chapters</p></a>';
+      }).join("");
+      app.innerHTML = '<h1 class="section-title">Study · Class ' + esc(STATE.profile.class) + '</h1><div class="grid cols-3">' + cards + '</div>';
+      return;
+    }
+    var subjectKey = args[0];
+    var subject = classSubjects(STATE.profile.class)[subjectKey];
+    if (!subject) { app.innerHTML = '<div class="card">Subject not found for current class.</div>'; return; }
+    if (args.length === 1) {
+      var chaptersHTML = subject.chapters.map(function (c, index) {
+        var topicNodes = c.topics.map(function (t) {
+          var st = getTopicStatus([STATE.profile.class, subject.name, c.title, t.title].join("|"));
+          return '<li class="list-item"><strong>' + esc(t.title) + '</strong> · <span class="' + st.className + '">' + esc(st.label) + '</span></li>';
+        }).join("");
+        return '<article class="card"><h3>' + (index + 1) + '. ' + esc(c.title) + '</h3><ul class="list">' + topicNodes + '</ul><div class="actions"><a class="btn btn-soft" href="#study/' + subjectKey + '/' + c.id + '">Open chapter</a><a class="btn btn-solid" href="#practice/start?subject=' + encodeURIComponent(subject.name) + '&chapter=' + encodeURIComponent(c.title) + '">Practice</a></div></article>';
+      }).join("");
+      app.innerHTML = '<h1 class="section-title">' + esc(subject.name) + '</h1><p class="muted">' + esc(subject.description) + '</p><div class="grid cols-2" style="margin-top:10px">' + chaptersHTML + '</div>';
+      return;
+    }
+    var chapter = subject.chapters.find(function (c) { return c.id === args[1]; });
+    if (!chapter) { app.innerHTML = '<div class="card">Chapter not found.</div>'; return; }
+    var topicCards = chapter.topics.map(function (t) {
+      var key = [STATE.profile.class, subject.name, chapter.title, t.title].join("|");
+      var st = getTopicStatus(key);
+      return '<article class="card"><h3>' + esc(t.title) + '</h3><p class="muted">' + esc(t.lesson) + '</p><p class="small ' + st.className + '">' + esc(st.label) + '</p><div class="actions"><a class="btn btn-soft" href="#study/' + subjectKey + '/' + chapter.id + '/' + t.id + '">Learn</a><a class="btn btn-solid" href="#practice/start?subject=' + encodeURIComponent(subject.name) + '&chapter=' + encodeURIComponent(chapter.title) + '&topic=' + encodeURIComponent(t.title) + '">Practice this topic</a></div></article>';
+    }).join("");
+    if (args.length === 2) {
+      app.innerHTML = '<h1 class="section-title">' + esc(chapter.title) + '</h1><p class="muted">' + esc(subject.name) + ' · Progress based on your recent practice.</p><div class="grid cols-2">' + topicCards + '</div>';
+      return;
+    }
+    var topic = chapter.topics.find(function (t) { return t.id === args[2]; });
+    if (!topic) { app.innerHTML = '<div class="card">Topic not found.</div>'; return; }
+    var topicId = [STATE.profile.class, subject.name, chapter.title, topic.title].join("|");
+    app.innerHTML =
+      '<article class="panel">' +
+      '<h1 class="section-title">' + esc(topic.title) + '</h1><p class="muted">' + esc(subject.name) + ' · ' + esc(chapter.title) + '</p>' +
+      '<p style="margin-top:8px">' + esc(topic.lesson) + '</p>' +
+      '<h2 style="margin:14px 0 6px">Key points</h2><ul>' + topic.keyPoints.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + '</ul>' +
+      '<h2 style="margin:14px 0 6px">Exam tips</h2><ul>' + topic.revision.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + '</ul>' +
+      '<div class="actions"><button class="btn btn-soft" data-action="complete-topic" data-id="' + esc(topicId) + '">Mark as completed</button><a class="btn btn-solid" href="#practice/start?subject=' + encodeURIComponent(subject.name) + '&chapter=' + encodeURIComponent(chapter.title) + '&topic=' + encodeURIComponent(topic.title) + '">Continue to practice</a><a class="btn btn-soft" href="#ai?subject=' + encodeURIComponent(subject.name) + '&chapter=' + encodeURIComponent(chapter.title) + '&topic=' + encodeURIComponent(topic.title) + '">Ask AI</a></div></article>';
+  }
+
+  function parseQuery(query) {
+    var out = {};
+    if (!query) return out;
+    query.split("&").forEach(function (kv) {
+      var p = kv.split("=");
+      out[decodeURIComponent(p[0] || "")] = decodeURIComponent(p[1] || "");
+    });
     return out;
   }
-  function saveChecklist(grade, subject, arr) {
-    var all = loadJSON(STORAGE.check, {}) || {};
-    all[checklistKey(grade, subject)] = arr;
-    saveJSON(STORAGE.check, all);
+
+  function buildPracticeSession(filters, testMode) {
+    var set = allQuestions(filters).filter(function (q) { return ["mcq", "assertion", "truefalse", "numerical", "short", "case"].indexOf(q.type) !== -1; });
+    if (!set.length) return null;
+    var max = testMode ? Math.min(20, set.length) : Math.min(10, set.length);
+    return {
+      mode: testMode ? "test" : "practice",
+      filters: filters,
+      questions: set.slice(0, max),
+      at: 0,
+      answers: {},
+      submitted: {},
+      startedAt: Date.now(),
+      timeLimitSec: testMode ? (max * 90) : null,
+      secLeft: testMode ? (max * 90) : null
+    };
   }
 
-  var qrState = { cards: [], i: 0 };
-
-  function renderSubject(grade, key) {
-    if (SUBJECTS.indexOf(key) === -1) { location.hash = '#class-' + grade; return; }
-    setNavActive('classes');
-    var b = bank(grade, key);
-    if (!b) { location.hash = '#class-' + grade; return; }
-    document.title = SUBJECT_NAMES[key] + ' · Class ' + grade + ' · Commerce-Students';
-    var checked = loadChecklist(grade, key, b.chapters.length);
-    var done = checked.filter(Boolean).length;
-    var totals = bankTotals(grade, key) || {};
-    var pct = Math.round((done / b.chapters.length) * 100);
-
-    // flashcards prepared before markup so the first paint is correct
-    qrState.cards = [];
-    b.chapters.forEach(function (ch) {
-      (ch.k || []).forEach(function (kp) { qrState.cards.push({ chapter: ch.t, text: kp }); });
-    });
-    qrState.i = 0;
-
-    var chaptersHTML = b.chapters.map(function (ch, ci) {
-      var keyPoints = (ch.k || []).map(function (kp, ki) {
-        return '<div class="keypoint"><b>' + (ki + 1) + '.</b> ' + esc(kp) + '</div>';
-      }).join('');
-      return '<div class="chapter' + (checked[ci] ? ' checked' : '') + '" data-ci="' + ci + '">' +
-        '<button class="chapter-row" type="button" aria-expanded="false">' +
-          '<span class="chapter-check" aria-hidden="true">' + (checked[ci] ? '✓' : '') + '</span>' +
-          '<span class="chapter-num">' + String(ci + 1).padStart(2, '0') + '</span>' +
-          '<span class="chapter-title">' + esc(ch.t) + '</span>' +
-          '<span class="chapter-toggle-ic" aria-hidden="true">＋</span>' +
-        '</button>' +
-        '<div class="chapter-body">' + keyPoints + '</div>' +
-      '</div>';
-    }).join('');
-
-    var c0 = qrState.cards[0];
-    var qrHTML = '<div class="qr-card" id="qr-card">' +
-      '<div class="qr-top"><span>Key point</span><span class="qr-count" id="qr-count">' + (qrState.i + 1) + ' / ' + qrState.cards.length + '</span></div>' +
-      '<div class="qr-chapter" id="qr-chapter">' + esc(c0.chapter) + '</div>' +
-      '<div class="qr-text" id="qr-text">' + esc(c0.text) + '</div>' +
-      '<div class="qr-nav">' +
-        '<button class="btn btn-soft btn-sm" id="qr-prev" type="button">← Previous</button>' +
-        '<button class="btn btn-soft btn-sm" id="qr-shuffle" type="button">Shuffle</button>' +
-        '<button class="btn btn-solid btn-sm" id="qr-next" type="button">Next →</button>' +
-      '</div></div>';
-
-    app.innerHTML =
-      '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'Class ' + grade, href: '#class-' + grade }, { label: SUBJECT_NAMES[key] }]) +
-        '<div class="subject-hero"><div>' +
-          '<span class="eyebrow">Class ' + grade + ' · ' + (key === 'information' ? 'Subject 802' : 'Core subject') + '</span>' +
-          '<h1>' + esc(SUBJECT_NAMES[key]) + '</h1>' +
-          '<p>' + esc(subjectBlurb(key)) + '</p>' +
-        '</div><div class="subject-hero-meta"><strong>' + b.chapters.length + '</strong><span>chapters</span>' +
-        '<div style="margin-top:8px"><strong style="font-size:15px">' + (totals.mcq + totals.sh + totals.lg + totals.cs) + '</strong><span>questions in the bank</span></div></div>' +
-        '</div>' +
-        '<div class="detail-grid">' +
-          '<section class="panel">' +
-            '<div class="panel-title"><h2>Chapter checklist</h2><span>Tick chapters as you revise</span></div>' +
-            '<div class="chapter-list" id="chapter-list">' + chaptersHTML + '</div>' +
-            '<div class="progress-wrap">' +
-              '<div class="progress-line"><i id="check-progress" style="width:' + pct + '%"></i></div>' +
-              '<div class="progress-meta"><span id="check-label">' + done + ' of ' + b.chapters.length + ' chapters revised</span><span id="check-pct">' + pct + '%</span></div>' +
-            '</div>' +
-            '<button class="btn btn-soft btn-sm checklist-reset" id="check-reset" type="button">Reset checklist</button>' +
-          '</section>' +
-          '<aside>' +
-            '<div class="panel">' +
-              '<div class="panel-title"><h2>Quick revision</h2><span>Flashcards from key points</span></div>' +
-              qrHTML +
-            '</div>' +
-            '<div class="side-actions">' +
-              '<a class="btn btn-solid" href="#revision/preset/' + grade + '/' + key + '">Revise this subject →</a>' +
-              '<a class="btn btn-soft" href="#class-' + grade + '">← All Class ' + grade + ' subjects</a>' +
-              (key === 'information' && grade === 11 ? '<a class="btn btn-soft" href="class11-it-notes.html">Open detailed IT notes ↗</a>' : '') +
-              '<a class="btn btn-soft" href="' + CURRICULUM_LINKS[key] + '" target="_blank" rel="noreferrer">CBSE curriculum PDF ↗</a>' +
-            '</div>' +
-          '</aside>' +
-        '</div>' +
-      '</section>';
-
-    function paintQr() {
-      var c = qrState.cards[qrState.i];
-      document.getElementById('qr-count').textContent = (qrState.i + 1) + ' / ' + qrState.cards.length;
-      document.getElementById('qr-chapter').textContent = c.chapter;
-      document.getElementById('qr-text').textContent = c.text;
+  function renderPractice(args) {
+    navActive("practice");
+    var raw = location.hash.split("?")[1] || "";
+    var query = parseQuery(raw);
+    if (!args || !args.length) {
+      app.innerHTML =
+        '<h1 class="section-title">Practice</h1><p class="muted">Filter by class, subject, chapter, topic, difficulty, and type.</p>' +
+        '<article class="card"><form id="practice-form" class="grid cols-3">' +
+        '<label>Class<select name="class"><option value="' + STATE.profile.class + '">Class ' + STATE.profile.class + '</option><option value="11">Class 11</option><option value="12">Class 12</option></select></label>' +
+        '<label>Subject<input name="subject" placeholder="Accountancy"></label>' +
+        '<label>Chapter<input name="chapter" placeholder="Partnership"></label>' +
+        '<label>Topic<input name="topic" placeholder="Goodwill"></label>' +
+        '<label>Difficulty<select name="difficulty"><option value="">Any</option><option>easy</option><option>medium</option><option>hard</option></select></label>' +
+        '<label>Type<select name="type"><option value="">Any</option><option>mcq</option><option>assertion</option><option>truefalse</option><option>numerical</option><option>short</option><option>case</option></select></label>' +
+        '<button class="btn btn-solid" type="submit">Start Practice</button>' +
+        '<a class="btn btn-soft" href="#mistakes">My Mistake Book</a>' +
+        '<a class="btn btn-soft" href="#practice/daily10">Today\'s 10</a>' +
+        '</form></article>';
+      return;
     }
-    function paintChecklistState(arr) {
-      var n = arr.filter(Boolean).length;
-      var p = Math.round((n / b.chapters.length) * 100);
-      app.querySelectorAll('#chapter-list .chapter').forEach(function (el) {
-        var i = Number(el.getAttribute('data-ci'));
-        el.classList.toggle('checked', !!arr[i]);
-        el.querySelector('.chapter-check').textContent = arr[i] ? '✓' : '';
-      });
-      document.getElementById('check-progress').style.width = p + '%';
-      document.getElementById('check-label').textContent = n + ' of ' + b.chapters.length + ' chapters revised';
-      document.getElementById('check-pct').textContent = p + '%';
+    if (args[0] === "daily10") {
+      STATE.currentPractice = {
+        mode: "practice",
+        filters: { class: STATE.profile.class },
+        questions: todaysDaily10(),
+        at: 0,
+        answers: {},
+        submitted: {},
+        startedAt: Date.now()
+      };
+      return renderPracticeSession();
     }
-
-    document.getElementById('qr-next').addEventListener('click', function () { qrState.i = (qrState.i + 1) % qrState.cards.length; paintQr(); });
-    document.getElementById('qr-prev').addEventListener('click', function () { qrState.i = (qrState.i - 1 + qrState.cards.length) % qrState.cards.length; paintQr(); });
-    document.getElementById('qr-shuffle').addEventListener('click', function () {
-      for (var i = qrState.cards.length - 1; i > 0; i--) {
-        var j = Math.floor(Math.random() * (i + 1));
-        var t = qrState.cards[i]; qrState.cards[i] = qrState.cards[j]; qrState.cards[j] = t;
-      }
-      qrState.i = 0; paintQr();
-    });
-
-    var list = document.getElementById('chapter-list');
-    list.addEventListener('click', function (e) {
-      var row = e.target.closest('.chapter-row');
-      if (!row) return;
-      var chapterEl = row.closest('.chapter');
-      var ci = Number(chapterEl.getAttribute('data-ci'));
-      if (e.target.closest('.chapter-check')) {
-        checked[ci] = !checked[ci];
-        saveChecklist(grade, key, checked);
-        paintChecklistState(checked);
+    if (args[0] === "start") {
+      var filters = {
+        class: query.class || STATE.profile.class,
+        subject: query.subject || "",
+        chapter: query.chapter || "",
+        topic: query.topic || "",
+        difficulty: query.difficulty || "",
+        type: query.type || ""
+      };
+      STATE.currentPractice = buildPracticeSession(filters, false);
+      if (!STATE.currentPractice) {
+        app.innerHTML = '<div class="card"><h2>We couldn\'t load this question set.</h2><p class="muted">Try broader filters.</p><a class="btn btn-soft" href="#practice">Try Again</a></div>';
         return;
       }
-      chapterEl.classList.toggle('open');
-      row.setAttribute('aria-expanded', String(chapterEl.classList.contains('open')));
-    });
-    document.getElementById('check-reset').addEventListener('click', function () {
-      for (var i = 0; i < checked.length; i++) checked[i] = false;
-      saveChecklist(grade, key, checked);
-      paintChecklistState(checked);
-    });
+      return renderPracticeSession();
+    }
   }
 
-  /* ---------------- revision builder ---------------- */
-
-  var revState = { grade: 11, type: 'mcq', subject: 'accountancy', chapters: {} };
-
-  function defaultChapters(grade, subject) {
-    var b = bank(grade, subject);
-    var sel = {};
-    if (b) b.chapters.forEach(function (_, ci) { sel[ci] = true; });
-    return sel;
-  }
-
-  function loadRevState() {
-    var saved = loadJSON(STORAGE.rev, null);
-    if (saved && [11, 12].indexOf(saved.grade) !== -1 && SUBJECTS.indexOf(saved.subject) !== -1 && TYPE_ORDER.indexOf(saved.type) !== -1) {
-      revState.grade = saved.grade;
-      revState.type = saved.type;
-      revState.subject = saved.subject;
-      revState.chapters = saved.chapters || {};
-      if (!Object.keys(revState.chapters).some(function (k) { return revState.chapters[k]; })) {
-        revState.chapters = defaultChapters(revState.grade, revState.subject);
-      }
+  function renderPracticeSession() {
+    var s = STATE.currentPractice;
+    if (!s || !s.questions.length) return;
+    var q = s.questions[s.at];
+    var picked = s.answers[s.at];
+    var submitted = s.submitted[s.at];
+    var isObjective = Array.isArray(q.options) && q.options.length;
+    var answerUI = "";
+    if (isObjective) {
+      answerUI = '<div class="options">' + q.options.map(function (opt, i) {
+        var cls = "option";
+        if (submitted) {
+          if (i === q.correctAnswer) cls += " correct";
+          if (picked === i && i !== q.correctAnswer) cls += " wrong";
+        }
+        return '<label class="' + cls + '"><input type="radio" name="practice-option" value="' + i + '" ' + (picked === i ? "checked" : "") + " " + (submitted ? "disabled" : "") + '><span><strong>' + "ABCD"[i] + '.</strong> ' + esc(opt) + '</span></label>';
+      }).join("") + "</div>";
+    } else if (q.type === "numerical") {
+      answerUI = '<label>Your answer<input id="numerical-answer" ' + (submitted ? "disabled" : "") + ' value="' + esc(picked || "") + '" placeholder="Type numeric answer"></label>';
     } else {
-      revState.chapters = defaultChapters(revState.grade, revState.subject);
+      answerUI = '<label>Your answer<textarea id="text-answer" rows="4" ' + (submitted ? "disabled" : "") + ' placeholder="Write your answer...">' + esc(picked || "") + '</textarea></label>';
     }
-  }
-  function saveRevState() { saveJSON(STORAGE.rev, revState); }
-
-  var lastPaper = null;
-
-  function renderRevision(preset) {
-    setNavActive('revision');
-    document.title = 'Revision · Commerce-Students';
-    if (preset) {
-      var parts = preset.split(':');
-      var g = Number(parts[0]);
-      if ([11, 12].indexOf(g) !== -1 && SUBJECTS.indexOf(parts[1]) !== -1) {
-        revState.grade = g;
-        revState.subject = parts[1];
-        revState.chapters = defaultChapters(g, parts[1]);
-        saveRevState();
-      }
-    } else {
-      loadRevState();
-    }
-
-    var b = bank(revState.grade, revState.subject);
-
     app.innerHTML =
-      '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'Revision' }]) +
-        '<div class="eyebrow">Five steps</div>' +
-        '<h1 class="page-title">Revision paper builder</h1>' +
-        '<p class="page-intro">Choose a class, a paper type, a subject and chapters — then generate a paper with original questions. Your choices are saved on this device.</p>' +
-        '<div class="steps-rail">' +
-          ['Class', 'Paper type', 'Subject', 'Chapters', 'Generate'].map(function (label, i) {
-            return '<span class="step-pill" id="step-pill-' + i + '"><i>' + (i + 1) + '</i>' + label + '</span>';
-          }).join('') +
-        '</div>' +
-        '<div class="rev-grid">' +
-          revStepHTML(0, 'Class', 'Which year are you revising?',
-            '<div class="choice-grid cols-2">' +
-              [11, 12].map(function (g2) {
-                return '<button type="button" class="choice' + (revState.grade === g2 ? ' selected' : '') + '" data-role="grade" data-value="' + g2 + '">' +
-                  '<span class="choice-check" aria-hidden="true">✓</span><span class="choice-tag">Year ' + (g2 - 10) + '</span><strong>Class ' + g2 + '</strong>' +
-                '</button>';
-              }).join('') +
-            '</div>') +
-          revStepHTML(1, 'Paper type', 'What should the generated paper contain?',
-            '<div class="choice-grid cols-5">' +
-              TYPE_ORDER.map(function (t) {
-                return '<button type="button" class="choice' + (revState.type === t ? ' selected' : '') + '" data-role="type" data-value="' + t + '">' +
-                  '<span class="choice-check" aria-hidden="true">✓</span><strong>' + TYPE_META[t].label + '</strong><small>' + esc(TYPE_META[t].desc) + '</small>' +
-                '</button>';
-              }).join('') +
-            '</div>') +
-          revStepHTML(2, 'Subject', 'Pick one of the five commerce subjects.',
-            '<div class="choice-grid cols-2">' +
-              SUBJECTS.map(function (key) {
-                return '<button type="button" class="choice' + (revState.subject === key ? ' selected' : '') + '" data-role="subject" data-value="' + key + '">' +
-                  '<span class="choice-check" aria-hidden="true">✓</span><span class="choice-tag">' + SUBJECT_ICONS[key] + '</span><strong>' + esc(SUBJECT_NAMES[key]) + '</strong>' +
-                '</button>';
-              }).join('') +
-            '</div>') +
-          revStepHTML(3, 'Chapters', 'Select all, one or multiple chapters for ' + esc(SUBJECT_NAMES[revState.subject]) + '.',
-            '<div class="chip-tools"><button type="button" id="ch-all">Select all</button><button type="button" id="ch-none">Clear all</button></div>' +
-            '<div class="chips-grid" id="chip-grid">' +
-              b.chapters.map(function (ch, ci) {
-                return '<button type="button" class="chip' + (revState.chapters[ci] ? ' selected' : '') + '" data-role="chapter" data-value="' + ci + '">' +
-                  '<span class="chip-box" aria-hidden="true">' + (revState.chapters[ci] ? '✓' : '') + '</span>' +
-                  '<span class="chip-num">' + String(ci + 1).padStart(2, '0') + '</span>' +
-                  '<span class="chip-label">' + esc(ch.t) + '</span>' +
-                '</button>';
-              }).join('') +
-            '</div>') +
-          revStepHTML(4, 'Generate', 'Check the plan, then build the paper.',
-            '<div class="summary-box" id="rev-summary"></div>' +
-            '<div class="rev-actions">' +
-              '<button class="btn btn-solid" id="rev-generate" type="button">Generate paper →</button>' +
-              '<span class="rev-note" id="rev-note"></span>' +
-            '</div>') +
-        '</div>' +
-      '</section>';
-
-    function revStepHTML(i, title, hint, body) {
-      return '<section class="rev-step" id="rev-step-' + i + '"><h3>' + (i + 1) + '. ' + title + '</h3><p class="step-hint">' + hint + '</p>' + body + '</section>';
-    }
-
-    function selCount() {
-      return Object.keys(revState.chapters).filter(function (k) { return revState.chapters[k]; }).length;
-    }
-
-    function summaryRows() {
-      var t = bankTotals(revState.grade, revState.subject) || {};
-      return '<div class="summary-row"><span>Class</span><span>Class ' + revState.grade + '</span></div>' +
-        '<div class="summary-row"><span>Paper</span><span>' + TYPE_META[revState.type].label + ' · ' + TYPE_META[revState.type].duration + '</span></div>' +
-        '<div class="summary-row"><span>Subject</span><span>' + esc(SUBJECT_NAMES[revState.subject]) + '</span></div>' +
-        '<div class="summary-row"><span>Chapters</span><span>' + selCount() + ' of ' + b.chapters.length + ' selected</span></div>' +
-        '<div class="summary-row"><span>Questions available</span><span>' + (t.mcq + t.sh + t.lg + t.cs) + ' in bank · ' + (t.mcq || 0) + ' MCQ / ' + (t.sh || 0) + ' short / ' + (t.lg || 0) + ' long / ' + (t.cs || 0) + ' case</span></div>';
-    }
-
-    function paintSteps() {
-      var valid = [
-        [11, 12].indexOf(revState.grade) !== -1,
-        TYPE_ORDER.indexOf(revState.type) !== -1,
-        SUBJECTS.indexOf(revState.subject) !== -1,
-        selCount() > 0,
-        true
-      ];
-      for (var i = 0; i < 5; i++) {
-        var pill = document.getElementById('step-pill-' + i);
-        if (!pill) return;
-        pill.classList.toggle('done', valid[i] && i < 4);
-        pill.classList.toggle('current', i === 4 && valid[3]);
-        document.getElementById('rev-step-' + i).style.opacity = valid[i] ? '1' : '.55';
-      }
-      var sum = document.getElementById('rev-summary');
-      if (sum) sum.innerHTML = summaryRows();
-      var note = document.getElementById('rev-note');
-      if (note) {
-        var n = selCount();
-        note.textContent = n ? 'Ready — questions will be drawn only from your ' + n + ' selected chapter' + (n > 1 ? 's' : '') + '.' : 'Select at least one chapter above.';
-      }
-    }
-
-    function paintChipStates() {
-      app.querySelectorAll('[data-role="chapter"]').forEach(function (el) {
-        var ci = Number(el.getAttribute('data-value'));
-        el.classList.toggle('selected', !!revState.chapters[ci]);
-        el.querySelector('.chip-box').textContent = revState.chapters[ci] ? '✓' : '';
-      });
-    }
-
-    var grid = app.querySelector('.rev-grid');
-    grid.addEventListener('click', function (e) {
-      var trigger = e.target.closest('button');
-      if (!trigger) return;
-      if (trigger.id === 'ch-all' || trigger.id === 'ch-none') {
-        var all = trigger.id === 'ch-all';
-        b.chapters.forEach(function (_, ci) { revState.chapters[ci] = all; });
-        saveRevState();
-        paintChipStates();
-        paintSteps();
-        return;
-      }
-      var role = trigger.getAttribute('data-role');
-      if (!role) return;
-      if (role === 'grade') {
-        revState.grade = Number(trigger.getAttribute('data-value'));
-        revState.chapters = defaultChapters(revState.grade, revState.subject);
-        saveRevState();
-        renderRevision(); // re-render with the new class
-        return;
-      }
-      if (role === 'subject') {
-        revState.subject = trigger.getAttribute('data-value');
-        revState.chapters = defaultChapters(revState.grade, revState.subject);
-        saveRevState();
-        renderRevision();
-        return;
-      }
-      if (role === 'type') {
-        revState.type = trigger.getAttribute('data-value');
-        saveRevState();
-        app.querySelectorAll('[data-role="type"]').forEach(function (el) {
-          el.classList.toggle('selected', el.getAttribute('data-value') === revState.type);
-        });
-        paintSteps();
-        return;
-      }
-      if (role === 'chapter') {
-        var ci = Number(trigger.getAttribute('data-value'));
-        revState.chapters[ci] = !revState.chapters[ci];
-        saveRevState();
-        paintChipStates();
-        paintSteps();
-      }
-    });
-
-    document.getElementById('rev-generate').addEventListener('click', function () {
-      if (!selCount()) return;
-      var spec = { grade: revState.grade, subject: revState.subject, type: revState.type, chapters: revState.chapters };
-      lastPaper = buildPaper(spec);
-      saveRevState();
-      saveJSON(STORAGE.paper, spec);
-      location.hash = '#paper';
-    });
-
-    for (var si = 0; si < 5; si++) {
-      (function (idx) {
-        var pill = document.getElementById('step-pill-' + idx);
-        pill.style.cursor = 'pointer';
-        pill.addEventListener('click', function () {
-          var el = document.getElementById('rev-step-' + idx);
-          if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-      })(si);
-    }
-
-    paintSteps();
+      '<h1 class="section-title">Practice Session</h1>' +
+      '<article class="question-card">' +
+      '<p class="small muted">' + esc(q.subject) + " · " + esc(q.chapter) + " · " + esc(q.topic) + "</p>" +
+      '<h2>Question ' + (s.at + 1) + " of " + s.questions.length + "</h2>" +
+      '<p>' + esc(q.question) + "</p>" + answerUI +
+      '<div class="actions">' +
+      (!submitted ? '<button class="btn btn-solid" data-action="submit-practice">Submit Answer</button>' : "") +
+      (submitted ? '<button class="btn btn-soft" data-action="next-practice">' + (s.at === s.questions.length - 1 ? "Finish Session" : "Next Question") + '</button>' : "") +
+      '<button class="btn btn-soft" data-action="exit-practice">Exit</button>' +
+      "</div>" +
+      (submitted ? '<div class="feedback"><strong>' + (s.submitted[s.at].correct ? "Correct ✓" : "Incorrect ✗") + '</strong><p>' + esc(q.explanation || "") + '</p>' + (q.solutionSteps ? "<ol>" + q.solutionSteps.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ol>" : "") + (q.finalAnswer ? "<p><strong>Final answer:</strong> " + esc(q.finalAnswer) + "</p>" : "") + "</div>" : "") +
+      "</article>";
   }
 
-  /* ---------------- paper ---------------- */
+  function finishPractice() {
+    var s = STATE.currentPractice;
+    var correct = Object.keys(s.submitted).filter(function (k) { return s.submitted[k].correct; }).length;
+    var total = s.questions.length;
+    var sec = Math.max(1, Math.round((Date.now() - s.startedAt) / 1000));
+    var topicScores = {};
+    s.questions.forEach(function (q, idx) {
+      var k = q.topic;
+      topicScores[k] = topicScores[k] || { total: 0, correct: 0 };
+      topicScores[k].total++;
+      if (s.submitted[idx] && s.submitted[idx].correct) topicScores[k].correct++;
+    });
+    var strong = [], weak = [];
+    Object.keys(topicScores).forEach(function (t) {
+      var acc = Math.round((topicScores[t].correct / topicScores[t].total) * 100);
+      if (acc >= 75) strong.push(t); else weak.push(t);
+    });
+    STATE.currentPractice = null;
+    app.innerHTML =
+      '<article class="panel"><h1 class="section-title">Practice Complete 🎉</h1>' +
+      '<p><strong>' + correct + " / " + total + '</strong> correct · Accuracy: ' + Math.round((correct / total) * 100) + "% · Time: " + Math.round(sec / 60) + " min</p>" +
+      '<h2 style="margin-top:14px">Strong</h2><p>' + (strong.length ? strong.map(esc).join(", ") : "—") + '</p>' +
+      '<h2 style="margin-top:10px">Needs work</h2><p>' + (weak.length ? weak.map(esc).join(", ") : "—") + '</p>' +
+      '<div class="actions"><a class="btn btn-soft" href="#mistakes">Review Mistakes</a><a class="btn btn-soft" href="#practice">Practice Weak Topics</a><a class="btn btn-solid" href="#home">Back to Dashboard</a></div></article>';
+  }
 
-  var paperCtx = { spec: null, paper: null };
-
-  function renderPaper() {
-    setNavActive('revision');
-    var spec = lastPaper && lastPaper.spec ? lastPaper.spec : loadJSON(STORAGE.paper, null);
-    if (!spec) { location.hash = '#revision'; return; }
-    paperCtx = { spec: spec, paper: buildPaper(spec) };
-    var paper = paperCtx.paper;
-    if (!paper) { location.hash = '#revision'; return; }
-    document.title = paper.typeLabel + ' · Class ' + spec.grade + ' · Commerce-Students';
-    var bookmarked = loadJSON(STORAGE.bookmark, {}) || {};
-    var bmCount = Object.keys(bookmarked).filter(function (id) { return bookmarked[id]; }).length;
-    var hasMcq = paper.sections.some(function (s) { return s.items.some(function (it) { return it.kind === 'mcq'; }); });
-    var b = bank(spec.grade, spec.subject);
-
-    function shortTitle(t, max) {
-      return t.length > max ? t.slice(0, max - 1) + '…' : t;
+  function renderMistakes() {
+    navActive("practice");
+    var ids = Object.keys(STATE.mistakes);
+    if (!ids.length) {
+      app.innerHTML = '<article class="card"><h1 class="section-title">My Mistake Book</h1><p>🎉 No mistakes saved yet.</p><div class="actions"><a class="btn btn-solid" href="#practice">Start Practice</a></div></article>';
+      return;
     }
+    var rows = ids.map(function (id) {
+      var q = getQuestionById(id);
+      var m = STATE.mistakes[id];
+      if (!q) return "";
+      return '<article class="card"><h3>' + esc(q.subject) + " · " + esc(q.topic) + '</h3><p>' + esc(q.question) + '</p>' +
+        '<p class="small muted">Mistakes: ' + m.count + " · Last: " + esc((m.lastSeen || "").slice(0, 10)) + '</p>' +
+        '<div class="actions"><a class="btn btn-soft" href="#practice/start?class=' + q.class + "&subject=" + encodeURIComponent(q.subject) + "&chapter=" + encodeURIComponent(q.chapter) + "&topic=" + encodeURIComponent(q.topic) + '">Practice Similar</a><a class="btn btn-soft" href="#ai?subject=' + encodeURIComponent(q.subject) + "&chapter=" + encodeURIComponent(q.chapter) + "&topic=" + encodeURIComponent(q.topic) + '">Ask AI</a><button class="btn btn-solid" data-action="mark-mastered" data-id="' + esc(id) + '">Mark Mastered</button></div></article>';
+    }).join("");
+    app.innerHTML = '<h1 class="section-title">My Mistake Book</h1><p class="muted">' + ids.length + ' mistakes to review.</p><div class="grid cols-2">' + rows + "</div>";
+  }
 
-    function questionHTML(it, si) {
-      var chTitle = b.chapters[it.chapter] ? b.chapters[it.chapter].t : '';
-      var body = '<div class="q-top">' +
-        '<span class="q-num">' + it.num + '</span>' +
-        '<span class="q-text">' + esc(it.q) + '</span>' +
-        '<button class="bm-btn" type="button" data-qid="' + esc(it.id) + '" aria-label="Bookmark question" title="Bookmark">' + (bookmarked[it.id] ? '★' : '☆') + '</button>' +
-        '<span class="q-marks">' + it.marks + ' mark' + (it.marks > 1 ? 's' : '') + '</span>' +
-      '</div>';
-      if (it.kind === 'mcq') {
-        body += '<div class="q-opts" role="radiogroup">' +
-          it.opts.map(function (opt, oi) {
-            return '<label class="q-opt" data-oi="' + oi + '"><input type="radio" name="q-' + si + '-' + it.num + '" value="' + oi + '"><span class="opt-letter">' + 'ABCD'[oi] + '.</span><span>' + esc(opt) + '</span></label>';
-          }).join('') +
-        '</div>' +
-        '<div class="q-feedback" id="fb-' + si + '-' + it.num + '"></div>';
+  function renderTests(args) {
+    navActive("tests");
+    if (!args || !args.length) {
+      app.innerHTML =
+        '<h1 class="section-title">Exam Mode</h1><p class="muted">Choose class, subject, chapter and timed question count.</p>' +
+        '<article class="card"><form id="test-form" class="grid cols-3">' +
+        '<label>Class<select name="class"><option value="' + STATE.profile.class + '">Class ' + STATE.profile.class + '</option><option value="11">Class 11</option><option value="12">Class 12</option></select></label>' +
+        '<label>Subject<input name="subject" placeholder="Accountancy"></label>' +
+        '<label>Chapter<input name="chapter" placeholder="Partnership"></label>' +
+        '<label>Question count<select name="count"><option>10</option><option>15</option><option>20</option></select></label>' +
+        '<button class="btn btn-solid" type="submit">Start Test</button>' +
+        '</form></article>';
+      return;
+    }
+    if (args[0] === "start") {
+      var query = parseQuery(location.hash.split("?")[1] || "");
+      var filters = { class: query.class || STATE.profile.class, subject: query.subject || "", chapter: query.chapter || "" };
+      STATE.currentTest = buildPracticeSession(filters, true);
+      if (!STATE.currentTest) {
+        app.innerHTML = '<div class="card"><h2>Could not build test set.</h2><a class="btn btn-soft" href="#tests">Try Again</a></div>';
+        return;
+      }
+      startTestTimer();
+      return renderTestSession();
+    }
+  }
+
+  function startTestTimer() {
+    if (STATE.testTimerId) clearInterval(STATE.testTimerId);
+    STATE.testTimerId = setInterval(function () {
+      if (!STATE.currentTest) return clearInterval(STATE.testTimerId);
+      STATE.currentTest.secLeft -= 1;
+      if (STATE.currentTest.secLeft <= 0) {
+        clearInterval(STATE.testTimerId);
+        submitTest();
       } else {
-        body += '<details class="model-answer"><summary>Model answer · ' + it.model.length + ' points</summary><div class="answer-list"><ul>' +
-          it.model.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') +
-        '</ul></div></details>';
+        var timer = document.getElementById("test-timer");
+        if (timer) timer.textContent = formatTime(STATE.currentTest.secLeft);
       }
-      body += '<span class="q-chapter-tag">Chapter ' + (it.chapter + 1) + ' · ' + esc(shortTitle(chTitle, 42)) + '</span>';
-      return '<div class="question" data-qid="' + esc(it.id) + '">' + body + '</div>';
-    }
+    }, 1000);
+  }
+  function formatTime(sec) {
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
 
+  function renderTestSession() {
+    var s = STATE.currentTest;
+    if (!s) return;
+    var q = s.questions[s.at];
+    var picked = s.answers[s.at];
     app.innerHTML =
-      '<section class="shell page-view">' +
-        '<div class="paper-wrap">' +
-          crumbs([{ label: 'Home', href: '#home' }, { label: 'Revision', href: '#revision' }, { label: paper.typeLabel }]) +
-          '<div class="paper-toolbar">' +
-            '<a class="btn btn-soft btn-sm" href="#revision">← Change revision plan</a>' +
-            (hasMcq ? '<button class="btn btn-solid btn-sm" id="paper-check" type="button">Check answers</button>' : '') +
-            '<button class="btn btn-soft btn-sm" id="paper-restart" type="button">Reset attempts</button>' +
-            '<button class="btn btn-soft btn-sm" id="paper-print" type="button">Print paper</button>' +
-          '</div>' +
-          '<div class="score-banner" id="score-banner"></div>' +
-          '<div class="paper-sheet">' +
-            '<div class="paper-head">' +
-              '<span class="paper-brand">Commerce-Students · Original practice paper</span>' +
-              '<h1>' + esc(paper.title) + ' — ' + esc(paper.typeLabel) + '</h1>' +
-              '<div class="paper-sub">' + esc(paper.extraNote) + '</div>' +
-              '<div class="paper-meta-row">' +
-                '<span class="paper-meta">' + paper.total + ' marks</span>' +
-                '<span class="paper-meta">' + paper.duration + '</span>' +
-                '<span class="paper-meta">' + paper.questionCount + ' questions</span>' +
-                '<span class="paper-meta" id="bm-meta">' + bmCount + ' bookmarked</span>' +
-              '</div>' +
-            '</div>' +
-            paper.sections.map(function (sec, si) {
-              return '<div class="paper-section">' +
-                '<div class="section-head-row"><h2>' + esc(sec.heading) + '</h2><span class="section-marks">' + sec.items.length + ' questions · ' + sec.marksEach + ' mark' + (sec.marksEach > 1 ? 's' : '') + ' each</span></div>' +
-                sec.items.map(function (it) { return questionHTML(it, si); }).join('') +
-              '</div>';
-            }).join('') +
-            '<div class="paper-foot">' +
-              '<span>Questions are original, written from the official CBSE 2026–27 curriculum.</span>' +
-              '<span>Bookmark stars are saved on this device.</span>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</section>';
+      '<h1 class="section-title">Timed Test</h1><p class="muted">Time remaining: <strong id="test-timer">' + formatTime(s.secLeft) + '</strong></p>' +
+      '<article class="question-card"><p class="small muted">' + esc(q.subject) + " · " + esc(q.chapter) + '</p><h2>Question ' + (s.at + 1) + " / " + s.questions.length + "</h2><p>" + esc(q.question) + '</p>' +
+      '<div class="options">' + (q.options || []).map(function (opt, i) {
+        return '<label class="option"><input type="radio" name="test-option" value="' + i + '" ' + (picked === i ? "checked" : "") + '><span><strong>' + "ABCD"[i] + ".</strong> " + esc(opt) + "</span></label>";
+      }).join("") + "</div>" +
+      '<div class="actions"><button class="btn btn-soft" data-action="test-prev">Previous</button><button class="btn btn-soft" data-action="test-next">Next</button><button class="btn btn-solid" data-action="test-submit">Submit Test</button></div></article>';
   }
 
-  /* Delegated handlers — attached ONCE to #app so re-renders never
-     stack duplicate listeners (which would double-toggle bookmarks). */
-  function qElFor(id) { return app.querySelector('.question[data-qid="' + id + '"]'); }
-
-  app.addEventListener('click', function (e) {
-    var t = e.target;
-    var bm = t.closest('.bm-btn');
-    if (bm) {
-      var id = bm.getAttribute('data-qid');
-      var marks = loadJSON(STORAGE.bookmark, {}) || {};
-      marks[id] = !marks[id];
-      saveJSON(STORAGE.bookmark, marks);
-      bm.classList.toggle('on', !!marks[id]);
-      bm.textContent = marks[id] ? '★' : '☆';
-      var meta = document.getElementById('bm-meta');
-      if (meta) meta.textContent = Object.keys(marks).filter(function (k) { return marks[k]; }).length + ' bookmarked';
-      return;
-    }
-    if (t.closest('#paper-print')) { window.print(); return; }
-    if (t.closest('#paper-restart')) {
-      var paper = paperCtx.paper;
-      if (!paper) return;
-      paper.sections.forEach(function (sec, si) {
-        sec.items.forEach(function (it) {
-          var qEl = qElFor(it.id);
-          if (!qEl) return;
-          qEl.classList.remove('correct', 'wrong');
-          var fb = document.getElementById('fb-' + si + '-' + it.num);
-          if (fb) { fb.classList.remove('show'); fb.innerHTML = ''; }
-          qEl.querySelectorAll('input[type="radio"]').forEach(function (r) { r.checked = false; });
-          qEl.querySelectorAll('.q-opt').forEach(function (o) { o.classList.remove('picked', 'opt-correct', 'opt-wrong'); });
-        });
-      });
-      var banner = document.getElementById('score-banner');
-      if (banner) banner.classList.remove('show');
-      return;
-    }
-    if (t.closest('#paper-check')) { checkAnswers(); }
-  });
-
-  app.addEventListener('change', function (e) {
-    var input = e.target;
-    if (!input || input.type !== 'radio') return;
-    var wrap = input.closest('.q-opts');
-    if (!wrap) return;
-    wrap.querySelectorAll('.q-opt').forEach(function (o) {
-      o.classList.toggle('picked', o.querySelector('input').checked);
+  function submitTest() {
+    var s = STATE.currentTest;
+    if (!s) return;
+    clearInterval(STATE.testTimerId);
+    var correct = 0;
+    s.questions.forEach(function (q, i) {
+      var ans = s.answers[i];
+      var ok = ans === q.correctAnswer;
+      if (ok) correct++;
+      markAttempt(q, ok, ans, "test");
     });
-  });
-
-  function checkAnswers() {
-    var paper = paperCtx.paper;
-    if (!paper) return;
-    var score = 0, answered = 0, totalMcq = 0;
-    paper.sections.forEach(function (sec, si) {
-      sec.items.forEach(function (it) {
-        if (it.kind !== 'mcq') return;
-        totalMcq++;
-        var qEl = qElFor(it.id);
-        if (!qEl) return;
-        var picked = qEl.querySelector('input[type="radio"]:checked');
-        var fb = document.getElementById('fb-' + si + '-' + it.num);
-        qEl.classList.remove('correct', 'wrong');
-        qEl.querySelectorAll('.q-opt').forEach(function (o) { o.classList.remove('opt-correct', 'opt-wrong'); });
-        if (!picked) {
-          if (fb) { fb.classList.remove('show'); fb.innerHTML = ''; }
-          return;
-        }
-        answered++;
-        var choice = Number(picked.value);
-        if (choice === it.correct) {
-          score++;
-          qEl.classList.add('correct');
-          var okOpt = qEl.querySelector('.q-opt[data-oi="' + choice + '"]');
-          if (okOpt) okOpt.classList.add('opt-correct');
-          if (fb) { fb.innerHTML = '<b>Correct</b>' + esc(it.exp || 'Well done.'); fb.classList.add('show'); }
-        } else {
-          qEl.classList.add('wrong');
-          var badOpt = qEl.querySelector('.q-opt[data-oi="' + choice + '"]');
-          var goodOpt = qEl.querySelector('.q-opt[data-oi="' + it.correct + '"]');
-          if (badOpt) badOpt.classList.add('opt-wrong');
-          if (goodOpt) goodOpt.classList.add('opt-correct');
-          if (fb) { fb.innerHTML = '<b>Not quite — correct option: ' + 'ABCD'[it.correct] + '</b>' + esc(it.exp || ''); fb.classList.add('show'); }
-        }
-      });
+    var total = s.questions.length;
+    var topic = {};
+    s.questions.forEach(function (q, i) {
+      if (!topic[q.chapter]) topic[q.chapter] = { t: 0, c: 0 };
+      topic[q.chapter].t++;
+      if (s.answers[i] === q.correctAnswer) topic[q.chapter].c++;
     });
-    var banner = document.getElementById('score-banner');
-    if (!banner) return;
-    var pct = totalMcq ? Math.round((score / totalMcq) * 100) : 0;
-    banner.innerHTML = '<div><strong>' + score + ' / ' + totalMcq + ' correct</strong><span class="score-detail"> · ' + pct + '%</span></div>' +
-      '<div class="score-detail">' + (totalMcq - answered) + ' unanswered · answers are marked on the questions</div>';
-    banner.classList.add('show');
-    if (banner.scrollIntoView) banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var rows = Object.keys(topic).map(function (ch) {
+      var pct = Math.round((topic[ch].c / topic[ch].t) * 100);
+      return "<li>" + esc(ch) + " — " + pct + "%</li>";
+    }).join("");
+    STATE.currentTest = null;
+    app.innerHTML =
+      '<article class="panel"><h1 class="section-title">Test Complete</h1>' +
+      '<p><strong>' + correct + " / " + total + '</strong> · Accuracy ' + Math.round((correct / total) * 100) + "%</p>" +
+      '<h2 style="margin-top:10px">Topic performance</h2><ul>' + rows + '</ul>' +
+      '<h2 style="margin-top:10px">Recommended next steps</h2><ul><li>Review low-scoring chapters</li><li>Review 3 mistakes</li><li>Take a 10-question quiz</li></ul>' +
+      '<div class="actions"><a class="btn btn-soft" href="#mistakes">Review Mistakes</a><a class="btn btn-solid" href="#practice">Practice Weak Topics</a></div></article>';
   }
 
-  /* ---------------- AI ---------------- */
+  function renderRevision() {
+    navActive("revision");
+    var cls = classSubjects(STATE.profile.class);
+    var chapterItems = [];
+    Object.keys(cls).forEach(function (k) { cls[k].chapters.forEach(function (c) { chapterItems.push(c); }); });
+    var chips = chapterItems.slice(0, 6).map(function (c, i) {
+      return '<article class="card"><h3>' + (i + 1) + ". " + esc(c.title) + '</h3><ol><li>Definition</li><li>Core method/formula</li><li>Worked idea</li><li>Common mistake</li><li>3 rapid questions</li></ol></article>';
+    }).join("");
+    var formulaRows = content.formulas.map(function (f) {
+      return '<article class="list-item"><strong>' + esc(f.name) + '</strong><p class="small muted">' + esc(f.subject) + " · " + esc(f.chapter) + '</p><p><code>' + esc(f.formula) + '</code></p><p class="small">Example: ' + esc(f.example) + "</p></article>";
+    }).join("");
+    var defRows = content.definitions.map(function (d) {
+      return '<article class="list-item"><strong>' + esc(d.term) + '</strong><p>' + esc(d.definition) + '</p><p class="small muted">Related: ' + d.related.map(esc).join(", ") + "</p></article>";
+    }).join("");
+    app.innerHTML =
+      '<h1 class="section-title">Revision Center</h1><div class="actions"><span class="badge">5-Minute Revision</span><span class="badge">Chapter Revision</span><span class="badge">Weak Topics</span><span class="badge">Formula Revision</span></div>' +
+      '<section class="grid cols-2" style="margin-top:12px">' + chips + '</section>' +
+      '<h2 style="margin:16px 0 10px">Formula Bank</h2><div class="list">' + formulaRows + '</div>' +
+      '<h2 style="margin:16px 0 10px">Definition Bank</h2><div class="list">' + defRows + "</div>";
+  }
 
   function renderAI() {
-    setNavActive('ai');
-    document.title = 'AI tools · Commerce-Students';
+    navActive("ai");
+    var query = parseQuery(location.hash.split("?")[1] || "");
+    var subject = query.subject || "";
+    var chapter = query.chapter || "";
+    var topic = query.topic || "";
+    var contextLine = [subject, chapter, topic].filter(Boolean).join(" · ");
     app.innerHTML =
-      '<section class="shell page-view">' +
-        crumbs([{ label: 'Home', href: '#home' }, { label: 'AI' }]) +
-        '<div class="eyebrow">Study with AI</div>' +
-        '<h1 class="page-title">Two AI tools, two jobs.</h1>' +
-        '<p class="page-intro">Both are free to start and open in a new tab. Use them together: clarify first, then turn your clarified notes into study material.</p>' +
-        '<div class="ai-grid">' +
-          '<a class="ai-card" href="https://gemini.google.com/" target="_blank" rel="noreferrer">' +
-            '<span class="ai-logo" aria-hidden="true">' + ICONS.gemini + '</span>' +
-            '<span class="ai-for">For doubts</span>' +
-            '<h3>Google Gemini</h3>' +
-            '<p class="ai-desc">Stuck on a concept, a format or a tricky question? Ask Gemini a specific question from your chapter and get a step-by-step explanation you can check against your textbook and notes.</p>' +
-            '<span class="ai-use">Best for: concept doubts · worked examples · checking your own answers</span>' +
-            '<span class="btn btn-solid">Open Gemini ↗</span>' +
-          '</a>' +
-          '<a class="ai-card" href="https://notebooklm.google.com/" target="_blank" rel="noreferrer">' +
-            '<span class="ai-logo" aria-hidden="true">' + ICONS.notebooklm + '</span>' +
-            '<span class="ai-for">For making notes</span>' +
-            '<h3>Google NotebookLM</h3>' +
-            '<p class="ai-desc">Paste in your chapter notes, summaries or syllabus points and let NotebookLM turn them into study material — organised notes, flashcards, question-and-answer sets and audio overviews you can listen to.</p>' +
-            '<span class="ai-use">Best for: making notes · flashcards · audio revision packs</span>' +
-            '<span class="btn btn-solid">Open NotebookLM ↗</span>' +
-          '</a>' +
-        '</div>' +
-        '<div class="ai-tip"><b>How students use both:</b> resolve your doubts with Gemini first, then feed the clarified notes into NotebookLM to build a revision pack for the night before the exam. Both tools work best with specific inputs — “Explain the BRS with a numerical” beats “teach me accountancy”.</div>' +
-      '</section>';
+      '<h1 class="section-title">AI Study Assistant</h1>' +
+      '<p class="muted">Specialized actions: Explain, Solve, Teach Me, Quiz Me, Check My Answer, Give Hint, Simplify.</p>' +
+      (contextLine ? '<p class="badge">Context: Class ' + STATE.profile.class + " · " + esc(contextLine) + "</p>" : "") +
+      '<article class="card"><h3>Generate context-aware prompt</h3><label>Action<select id="ai-action"><option>Explain</option><option>Solve</option><option>Teach Me</option><option>Quiz Me</option><option>Check My Answer</option><option>Give Hint</option><option>Simplify</option></select></label><label>Question / answer<input id="ai-input" placeholder="Paste your question or your answer"></label><div class="actions"><button class="btn btn-solid" data-action="build-ai-prompt">Build prompt</button></div><pre id="ai-prompt-out" class="list-item">AI not connected. Configure your own backend endpoint if needed.</pre></article>';
   }
 
-  /* ---------------- router ---------------- */
-
-  function getRoute() {
-    var raw = (location.hash || '#home').slice(1).replace(/^\//, '');
-    if (raw === '' || raw === 'home') return { type: 'home' };
-    if (raw === 'classes') return { type: 'classes' };
-    if (raw === 'revision') return { type: 'revision' };
-    if (raw === 'ai') return { type: 'ai' };
-    if (raw === 'paper') return { type: 'paper' };
-    var m = raw.match(/^class-(11|12)(?:\/([a-z]+))?$/);
-    if (m) return { type: m[2] ? 'subject' : 'class', grade: Number(m[1]), key: m[2] || null };
-    return { type: 'home' };
+  function renderProgress() {
+    navActive("progress");
+    var ov = calcOverview();
+    var sub = subjectStats();
+    var subRows = Object.keys(sub).map(function (name) {
+      var pct = Math.round((sub[name].correct / sub[name].total) * 100);
+      return '<article class="list-item"><strong>' + esc(name) + '</strong><p class="small muted">' + sub[name].total + " attempts</p><div class=\"progress\"><i style=\"width:" + pct + '%"></i></div><p class="small">' + pct + "%</p></article>";
+    }).join("");
+    var topicStats = computeTopicStats();
+    var weak = Object.keys(topicStats).filter(function (k) {
+      var t = topicStats[k];
+      var pct = Math.round((t.correct / t.total) * 100);
+      return t.total >= 3 && pct < 60;
+    }).map(function (k) {
+      var t = topicStats[k];
+      var pct = Math.round((t.correct / t.total) * 100);
+      return "<li>" + esc(t.topic) + " · " + pct + "% accuracy · " + t.total + " questions</li>";
+    }).join("");
+    app.innerHTML =
+      '<h1 class="section-title">My Progress</h1><section class="kpis"><article class="card"><div class="kpi">' + ov.total + '</div><div class="small muted">Questions solved</div></article><article class="card"><div class="kpi">' + ov.accuracy + '%</div><div class="small muted">Accuracy</div></article><article class="card"><div class="kpi">' + ov.tests + '</div><div class="small muted">Tests</div></article><article class="card"><div class="kpi">' + ov.mistakes + '</div><div class="small muted">Mistakes</div></article></section>' +
+      '<h2 style="margin:16px 0 10px">Subject performance</h2><div class="grid cols-2">' + (subRows || '<article class="card">Your progress will appear after your first practice session.</article>') + '</div>' +
+      '<h2 style="margin:16px 0 8px">Weak topics</h2><article class="card"><p class="muted">Based on your recent practice.</p><ul>' + (weak || "<li>No weak topics detected yet.</li>") + '</ul></article>';
   }
 
-  function onHash() {
-    // #revision/preset/<grade>/<subject> → apply preset, normalise the hash
-    var m = (location.hash || '').match(/^#revision\/preset\/(11|12)\/([a-z]+)/);
-    var preset = m ? m[1] + ':' + m[2] : null;
-    if (preset && location.hash !== '#revision') {
-      try { history.replaceState(null, '', '#revision'); } catch (err) { /* very old browsers */ }
+  function renderProfile() {
+    navActive("profile");
+    app.innerHTML =
+      '<h1 class="section-title">Profile</h1>' +
+      '<article class="card"><form id="profile-form" class="grid cols-2">' +
+      '<label>Name<input name="name" value="' + esc(STATE.profile.name || "") + '"></label>' +
+      '<label>Class<select name="class"><option value="11"' + (STATE.profile.class === 11 ? " selected" : "") + '>Class 11</option><option value="12"' + (STATE.profile.class === 12 ? " selected" : "") + '>Class 12</option></select></label>' +
+      '<label>Exam date<input type="date" name="examDate" value="' + esc(STATE.profile.examDate || "") + '"></label>' +
+      '<label>Daily target (minutes)<input type="number" name="dailyTarget" min="10" max="300" value="' + esc(STATE.profile.dailyTarget || 30) + '"></label>' +
+      '<label style="grid-column:1/-1">Subjects (comma separated)<input name="subjects" value="' + esc((STATE.profile.subjects || []).join(", ")) + '"></label>' +
+      '<div class="actions" style="grid-column:1/-1"><button class="btn btn-solid" type="submit">Save profile</button><button class="btn btn-soft" type="button" data-action="reset-progress">Reset progress</button></div>' +
+      "</form></article>" +
+      '<article class="card"><h2>Settings</h2><p class="muted">Theme, local progress, and preference data are saved on this device.</p></article>';
+  }
+
+  function renderSearchResults(items) {
+    var existing = document.getElementById("search-results");
+    if (existing) existing.remove();
+    if (!items.length) return;
+    var box = document.createElement("div");
+    box.id = "search-results";
+    box.className = "search-results";
+    box.innerHTML = items.slice(0, 8).map(function (item) {
+      return '<a class="search-link" href="' + item.href + '"><strong>' + esc(item.title) + '</strong><br><span class="small muted">' + esc(item.meta) + "</span></a>";
+    }).join("");
+    searchInput.parentElement.appendChild(box);
+  }
+
+  function globalSearch(text) {
+    var q = text.trim().toLowerCase();
+    if (!q) return renderSearchResults([]);
+    var list = [];
+    Object.keys(content.classes).forEach(function (grade) {
+      var subs = content.classes[grade];
+      Object.keys(subs).forEach(function (k) {
+        var s = subs[k];
+        if (s.name.toLowerCase().indexOf(q) !== -1) list.push({ title: s.name, meta: "Class " + grade + " subject", href: "#study/" + k });
+        s.chapters.forEach(function (c) {
+          if (c.title.toLowerCase().indexOf(q) !== -1) list.push({ title: c.title, meta: s.name + " · Class " + grade, href: "#study/" + k + "/" + c.id });
+          c.topics.forEach(function (t) {
+            if (t.title.toLowerCase().indexOf(q) !== -1) list.push({ title: t.title, meta: s.name + " · " + c.title, href: "#study/" + k + "/" + c.id + "/" + t.id });
+          });
+        });
+      });
+    });
+    content.formulas.forEach(function (f) {
+      if ((f.name + " " + f.topic).toLowerCase().indexOf(q) !== -1) list.push({ title: f.name, meta: "Formula · " + f.subject, href: "#revision" });
+    });
+    content.questions.forEach(function (qItem) {
+      if (qItem.question.toLowerCase().indexOf(q) !== -1) list.push({ title: qItem.chapter + " question", meta: qItem.subject + " · " + qItem.topic, href: "#practice/start?class=" + qItem.class + "&subject=" + encodeURIComponent(qItem.subject) + "&chapter=" + encodeURIComponent(qItem.chapter) + "&topic=" + encodeURIComponent(qItem.topic) });
+    });
+    renderSearchResults(list);
+  }
+
+  function route() {
+    STATE.route = getBaseRoute(location.hash);
+    var page = STATE.route.page;
+    var args = STATE.route.args || [];
+    if (page === "home") return renderHome();
+    if (page === "study") return renderStudy(args);
+    if (page === "practice") return renderPractice(args);
+    if (page === "mistakes") return renderMistakes();
+    if (page === "tests") return renderTests(args);
+    if (page === "revision") return renderRevision();
+    if (page === "ai") return renderAI();
+    if (page === "progress") return renderProgress();
+    if (page === "profile") return renderProfile();
+    renderHome();
+  }
+
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    var action = btn.getAttribute("data-action");
+    if (action === "set-class") {
+      STATE.profile.class = Number(btn.getAttribute("data-value"));
+      saveJSON(LS.profile, STATE.profile);
+      route();
     }
-    menuOpen = false;
-    paintMenu();
-    var route = getRoute();
-    if (route.type === 'class') renderClass(route.grade);
-    else if (route.type === 'subject') renderSubject(route.grade, route.key);
-    else if (route.type === 'classes') renderClasses();
-    else if (route.type === 'revision') renderRevision(preset);
-    else if (route.type === 'ai') renderAI();
-    else if (route.type === 'paper') renderPaper();
-    else renderHome();
-    window.scrollTo(0, 0);
-  }
+    if (action === "complete-topic") {
+      STATE.completedTopics[btn.getAttribute("data-id")] = true;
+      saveJSON(LS.completed, STATE.completedTopics);
+      btn.textContent = "Completed ✓";
+      btn.disabled = true;
+    }
+    if (action === "submit-practice") {
+      var s = STATE.currentPractice; if (!s) return;
+      var q = s.questions[s.at];
+      var userAnswer = null;
+      if (q.options && q.options.length) {
+        var picked = app.querySelector('input[name="practice-option"]:checked');
+        if (!picked) return;
+        userAnswer = Number(picked.value);
+      } else if (q.type === "numerical") {
+        var val = document.getElementById("numerical-answer");
+        userAnswer = val ? String(val.value || "").trim() : "";
+      } else {
+        var txt = document.getElementById("text-answer");
+        userAnswer = txt ? String(txt.value || "").trim() : "";
+      }
+      var isCorrect;
+      if (typeof q.correctAnswer === "number") isCorrect = userAnswer === q.correctAnswer;
+      else if (typeof q.correctAnswer === "string") isCorrect = String(userAnswer).replace(/[^\d.]/g, "") === q.correctAnswer.replace(/[^\d.]/g, "");
+      else isCorrect = userAnswer.length > 0;
+      s.answers[s.at] = userAnswer;
+      s.submitted[s.at] = { correct: isCorrect };
+      markAttempt(q, isCorrect, userAnswer, "practice");
+      renderPracticeSession();
+    }
+    if (action === "next-practice") {
+      var p = STATE.currentPractice; if (!p) return;
+      if (p.at >= p.questions.length - 1) finishPractice(); else { p.at++; renderPracticeSession(); }
+    }
+    if (action === "exit-practice") {
+      STATE.currentPractice = null; location.hash = "#practice";
+    }
+    if (action === "mark-mastered") {
+      delete STATE.mistakes[btn.getAttribute("data-id")];
+      saveJSON(LS.mistakes, STATE.mistakes);
+      renderMistakes();
+    }
+    if (action === "test-next" || action === "test-prev") {
+      var t = STATE.currentTest; if (!t) return;
+      var pick = app.querySelector('input[name="test-option"]:checked');
+      if (pick) t.answers[t.at] = Number(pick.value);
+      t.at = Math.max(0, Math.min(t.questions.length - 1, t.at + (action === "test-next" ? 1 : -1)));
+      renderTestSession();
+    }
+    if (action === "test-submit") {
+      if (confirm("Submit test now?")) {
+        var pt = app.querySelector('input[name="test-option"]:checked');
+        if (pt) STATE.currentTest.answers[STATE.currentTest.at] = Number(pt.value);
+        submitTest();
+      }
+    }
+    if (action === "build-ai-prompt") {
+      var aiAction = document.getElementById("ai-action").value;
+      var aiInput = document.getElementById("ai-input").value.trim();
+      var meta = parseQuery(location.hash.split("?")[1] || "");
+      var prompt = "Class: " + STATE.profile.class + "\nSubject: " + (meta.subject || "N/A") + "\nChapter: " + (meta.chapter || "N/A") + "\nTopic: " + (meta.topic || "N/A") + "\nAction: " + aiAction + "\nStudent Input: " + aiInput + "\nPlease explain in simple steps, include exam tip, and one practice question.";
+      document.getElementById("ai-prompt-out").textContent = prompt;
+    }
+    if (action === "reset-progress") {
+      if (!confirm("Reset all local progress data?")) return;
+      [LS.attempts, LS.mistakes, LS.completed, LS.daily].forEach(function (k) { localStorage.removeItem(k); });
+      STATE.attempts = [];
+      STATE.mistakes = {};
+      STATE.completedTopics = {};
+      route();
+    }
+  });
 
-  loadRevState();
-  window.addEventListener('hashchange', onHash);
-  onHash();
+  document.addEventListener("submit", function (e) {
+    if (e.target.id === "practice-form") {
+      e.preventDefault();
+      var f = new FormData(e.target);
+      location.hash = "#practice/start?class=" + encodeURIComponent(f.get("class")) +
+        "&subject=" + encodeURIComponent(f.get("subject")) +
+        "&chapter=" + encodeURIComponent(f.get("chapter")) +
+        "&topic=" + encodeURIComponent(f.get("topic")) +
+        "&difficulty=" + encodeURIComponent(f.get("difficulty")) +
+        "&type=" + encodeURIComponent(f.get("type"));
+    }
+    if (e.target.id === "test-form") {
+      e.preventDefault();
+      var ft = new FormData(e.target);
+      location.hash = "#tests/start?class=" + encodeURIComponent(ft.get("class")) +
+        "&subject=" + encodeURIComponent(ft.get("subject")) +
+        "&chapter=" + encodeURIComponent(ft.get("chapter")) +
+        "&count=" + encodeURIComponent(ft.get("count"));
+    }
+    if (e.target.id === "profile-form") {
+      e.preventDefault();
+      var fp = new FormData(e.target);
+      STATE.profile = {
+        name: String(fp.get("name") || "Student"),
+        class: Number(fp.get("class") || 12),
+        examDate: String(fp.get("examDate") || ""),
+        dailyTarget: Number(fp.get("dailyTarget") || 30),
+        subjects: String(fp.get("subjects") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean)
+      };
+      saveJSON(LS.profile, STATE.profile);
+      location.hash = "#home";
+    }
+  });
+
+  searchInput.addEventListener("input", function () {
+    globalSearch(searchInput.value);
+  });
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".search-wrap")) {
+      var ex = document.getElementById("search-results");
+      if (ex) ex.remove();
+    }
+  });
+
+  themeToggle.addEventListener("click", function () {
+    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+  window.addEventListener("hashchange", route);
+
+  applyTheme();
+  route();
 })();
